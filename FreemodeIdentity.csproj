@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="14.0" DefaultTargets="Build"
+  xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
+    <ProjectGuid>{8B3D1A6C-5E27-4F94-A1D8-6C2B0F9E4A3D}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>FreemodeIdentity</RootNamespace>
+    <AssemblyName>FreemodeIdentity</AssemblyName>
+    <!-- make package reads <Version> for gta5mod.json. The DLL's AssemblyVersion/
+         FileVersion come from Properties\AssemblyInfo.cs (this legacy project
+         ignores the csproj equivalents); keep both in sync via set-version.ps1. -->
+    <Version>0.1.0.0</Version>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <NuGetPackageImportStamp>
+    </NuGetPackageImportStamp>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x64' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <UseVSHostingProcess>true</UseVSHostingProcess>
+    <LangVersion>7.1</LangVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x64' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <LangVersion>7.1</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="LemonUI">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\packages\LemonUI.SHVDN3.dll</HintPath>
+    </Reference>
+    <Reference Include="ScriptHookVDotNet3, Version=3.4.0.0, Culture=neutral, processorArchitecture=AMD64">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\packages\ScriptHookVDotNet3.dll</HintPath>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <!-- Shared helpers (one copy each, deduped from AK + FW). -->
+    <Compile Include="ScriptPaths.cs" />
+    <Compile Include="MemScan.cs" />
+    <Compile Include="Joaat.cs" />
+    <!-- Appearance engine (from AppearanceKeeper). -->
+    <Compile Include="AppearanceData.cs" />
+    <Compile Include="PedAppearance.cs" />
+    <Compile Include="XmlAppearanceStorage.cs" />
+    <Compile Include="PedHeadBlendMemory.cs" />
+    <Compile Include="MoodMemory.cs" />
+    <Compile Include="MovingStyleMemory.cs" />
+    <Compile Include="PedDecorationMemory.cs" />
+    <Compile Include="DecorationBaseFinder.cs" />
+    <Compile Include="FacialMoods.cs" />
+    <Compile Include="MovingStyles.cs" />
+    <!-- Wallet / spoof engine (from FreemodeWallet). -->
+    <Compile Include="Identity.cs" />
+    <Compile Include="Spoof.cs" />
+    <Compile Include="Wallet.cs" />
+    <Compile Include="ShimBridge.cs" />
+    <Compile Include="Earning.cs" />
+    <!-- The unified Script. -->
+    <Compile Include="FreemodeIdentity.cs" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

@@ -1,0 +1,14 @@
+# For the rules to work enable Omnisharp in VSCode settings
+[*.cs]
+indent_style = tab
+indent_size = 4
+csharp_new_line_before_open_brace = none
+csharp_new_line_before_else = false
+csharp_new_line_before_catch = false
+csharp_new_line_before_finally = false
+csharp_new_line_before_members_in_anonymous_types = false
+csharp_new_line_before_members_in_object_initializers = false
+csharp_new_line_before_members_in_property_declarations = false
+csharp_new_line_before_accessors = false
+
+dotnet_diagnostic.IDE0031.severity = none

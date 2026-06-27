@@ -1,0 +1,23 @@
+bin/
+obj/
+dist/
+.vs/*
+
+# Build artifacts and runtime files that must never be committed.
+*.dll
+*.log
+
+# Native shim build output (when added).
+*.asi
+build/
+
+# Website mod description (kept locally, not part of the repo).
+DESCRIPTION.html
+
+# Keep shared build tasks; ignore the per-user VS Code files.
+.vscode/*
+!.vscode/tasks.json
+
+# Session handoff scratch — local only, never committed
+HANDOFF.md
+DESCRIPTION.md
