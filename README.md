@@ -163,3 +163,9 @@ commit builds and publishes a release - the tag is the version source of truth.
   they come out free even with the wallet on. Shops, ATMs and stat-based payouts work.
 - **Overlay tint colours** round-trip shape and opacity but not the palette colour on
   Enhanced yet; **custom moving styles/moods** outside the known tables are left unset.
+
+## License
+
+MIT - see [LICENSE](LICENSE). You're free to use, modify and redistribute, including in
+your own mods, as long as you keep the copyright and licence notice. The bundled MinHook
+in `native/third_party/minhook/` is under its own BSD-2-Clause licence (kept alongside it).
