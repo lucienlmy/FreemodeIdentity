@@ -61,6 +61,7 @@ constexpr ULONGLONG kAffordWindowMs = 750; // GET→SET pairing window for a pur
 int g_reported[kReportedRing] = {};     // ring of values we recently handed out via GET
 int g_reportedCount = 0;                // total reports (index via % kReportedRing)
 ULONGLONG g_lastAffordGetTick = 0;      // tick of the last redirected affordability GET
+int g_lastTracedGet = -1;               // last GET value we trace-logged, to collapse per-frame repeats
 
 // Trace gate: at Debug log level (C# pushes it from the ini [Logging] Level), log every
 // redirected GET/SET on the active stat — value + the gate booleans — to inspect the call
@@ -142,8 +143,13 @@ void HookStatGetInt(rage::scrNativeCallContext* ctx) {
 		// the SET hook can pair a debit to it and reject a later echo of this same value.
 		g_lastAffordGetTick = GetTickCount64();
 		RememberReported(value);
-		if (TraceOn())
+		// The game polls this stat EVERY FRAME while spoofed, so tracing each GET floods the log
+		// with identical lines. Log only when the reported value changes — that's the only GET
+		// that carries information; the steady-state poll is noise.
+		if (TraceOn() && value != g_lastTracedGet) {
+			g_lastTracedGet = value;
 			Logger::Debugf("redirect GET stat=0x%08X -> reported $%d", statHash, value);
+		}
 		return;
 	}
 	g_origStatGetInt(ctx);
