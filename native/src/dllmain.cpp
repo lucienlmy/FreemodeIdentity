@@ -43,7 +43,7 @@ void ScriptMain() {
 // Exported for the C# mod: returns the address of the shared bridge block so C# can
 // drive redirectEnabled / activeStat / balance and read back debits. C resolves it via
 // GetProcAddress("FreemodeIdentity_GetState") on the loaded FreemodeIdentity.asi.
-extern "C" __declspec(dllexport) FreemodeWalletState* FreemodeIdentity_GetState() {
+extern "C" __declspec(dllexport) ShimBridgeState* FreemodeIdentity_GetState() {
 	return WalletHook::State();
 }
 

@@ -6,7 +6,8 @@ namespace FreemodeIdentity {
 	// handlers, so the shim does the STAT spend-redirect; this side drives it. The shim
 	// exports FreemodeIdentity_GetState() returning a pointer to a shared block:
 	//
-	//   struct { int version; int redirectEnabled; int activeStat; int balance; int pendingDelta; int logLevel; }
+	//   struct { int version; int redirectEnabled; int activeStat; int balance; int pendingDelta;
+	//            int logLevel; ulong decorationBase; ulong waypointInfoArray[4]; }
 	//
 	// C# is the authority: we write redirectEnabled / activeStat / balance. Money events come
 	// back as `pendingDelta` — a signed change the shim ACCUMULATES (shop debit < 0, script
@@ -15,10 +16,11 @@ namespace FreemodeIdentity {
 	// spending / redirected payouts are unavailable.
 	internal sealed class ShimBridge {
 		const string AsiName = "FreemodeIdentity.asi";
-		const int ExpectedVersion = 2;
+		const int ExpectedVersion = 3;
 
-		// Field byte offsets in the shared struct. Six 4-byte ints, then an 8-byte pointer placed
-		// last on its natural 8-byte boundary (even int count before it ⇒ no padding).
+		// Field byte offsets in the shared struct. Six 4-byte ints, then 8-byte pointers on their
+		// natural 8-byte boundary (even int count before the first ⇒ no padding): decorationBase, then
+		// the four waypointInfoArray entry addresses contiguously.
 		const int OffVersion = 0;
 		const int OffRedirect = 4;
 		const int OffActiveStat = 8;
@@ -26,7 +28,8 @@ namespace FreemodeIdentity {
 		const int OffPendingDelta = 16;
 		const int OffLogLevel = 20;
 		const int OffDecorationBase = 24;
-		const int StateSize = 32;
+		const int OffWaypointArray = 32; // four 8-byte addresses at 32/40/48/56
+		const int StateSize = 64;
 
 		[DllImport("kernel32.dll", CharSet = CharSet.Ansi)]
 		static extern IntPtr GetModuleHandle(string name);
@@ -101,6 +104,20 @@ namespace FreemodeIdentity {
 			get {
 				if (state == IntPtr.Zero) return IntPtr.Zero;
 				return (IntPtr)Marshal.ReadInt64(state, OffDecorationBase);
+			}
+		}
+
+		// The four Enhanced WaypointInfoArray entry addresses the shim resolved (all IntPtr.Zero if it
+		// couldn't, or the shim isn't connected). C# re-keys the matching entry to follow the spoof —
+		// Enhanced only, since it can't pattern-scan the encrypted .text itself. See WaypointKeeper.
+		public IntPtr[] WaypointEntries {
+			get {
+				var entries = new IntPtr[4];
+				if (state == IntPtr.Zero) return entries;
+				for (int i = 0; i < 4; i++) {
+					entries[i] = (IntPtr)Marshal.ReadInt64(state, OffWaypointArray + i * 8);
+				}
+				return entries;
 			}
 		}
 

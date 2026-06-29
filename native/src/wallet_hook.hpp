@@ -1,6 +1,6 @@
 #pragma once
 
-struct FreemodeWalletState;
+struct ShimBridgeState;
 
 // The native spend-redirect shim. Hooks STAT_GET_INT / STAT_SET_INT so that, while C#
 // has redirect enabled (the player is spoofed to a protagonist), the shop's reads/writes
@@ -13,6 +13,6 @@ bool Install();
 void Uninstall();
 
 // The shared bridge block (see shared_state.hpp). Exported to C# via dllmain.
-FreemodeWalletState* State();
+ShimBridgeState* State();
 
 } // namespace WalletHook

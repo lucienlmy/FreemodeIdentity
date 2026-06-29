@@ -32,6 +32,7 @@ add_library(FreemodeIdentity SHARED
 	src/pattern.cpp
 	src/build_edition.cpp
 	src/decoration.cpp
+	src/waypoint.cpp
 	src/natives.cpp
 	src/natives_legacy.cpp
 	src/wallet_hook.cpp

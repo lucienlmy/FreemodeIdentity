@@ -37,6 +37,10 @@ namespace FreemodeIdentity {
 		// read off the (spoofed) ped. 0 when not held / never engaged.
 		public uint OriginalHash => Held ? originalHash : 0u;
 
+		// The protagonist model hash we paint while held (0 when not held). The WaypointKeeper needs
+		// it to re-key the waypoint entry to match the identity the lookup sees while spoofed.
+		public uint SpoofHash => Held ? spoofHash : 0u;
+
 		IntPtr heldHashAddr = IntPtr.Zero;
 		uint originalHash;
 		uint spoofHash;

@@ -225,6 +225,11 @@ namespace FreemodeIdentity {
 		const int MenuTickGapMs = 500;
 		bool spoofHoldUntilReapply; // set by the pause-drop; cleared on menu close (OnTick tick-gap)
 		int lastTickMs = -1; // Environment.TickCount of the previous tick; -1 until the first tick
+		// Last spoof hash pair seen while held, kept so a release flip can re-key the waypoint back to
+		// freemode even after Tick() zeroed the live hashes. See the WaypointKeeper flip in OnTick.
+		uint lastFreemodeHash;
+		uint lastSpoofHash;
+		bool spoofHeldPrev; // previous tick's spoof.Held, for edge-detecting the flip across Start/Stop
 		int spoofSettleTicks;
 		int spoofSettlePed;
 		int spoofSettleModel;
@@ -583,6 +588,23 @@ namespace FreemodeIdentity {
 					}
 				}
 				spoof.Tick();
+
+				// On a spoof flip, re-key the map waypoint so it follows the identity (the game stores
+				// waypoints keyed by ped model hash, which the spoof changes). The flip happens via
+				// Start()/Stop() earlier in this tick, so we compare against a PERSISTENT field — a
+				// local captured mid-tick would already reflect the new state and miss the edge. While
+				// held the hashes read live; on a release flip they're already 0, so we use the pair we
+				// remembered on the matching engage.
+				if (spoof.Held != spoofHeldPrev) {
+					spoofHeldPrev = spoof.Held;
+					if (spoof.Held) {
+						lastFreemodeHash = spoof.OriginalHash;
+						lastSpoofHash = spoof.SpoofHash;
+						WaypointKeeper.OnSpoofFlip(true, lastFreemodeHash, lastSpoofHash, shim.WaypointEntries);
+					} else {
+						WaypointKeeper.OnSpoofFlip(false, lastFreemodeHash, lastSpoofHash, shim.WaypointEntries);
+					}
+				}
 
 				// Earning credits only while the wallet is on AND earning is on; it still tracks
 				// pickups otherwise so the baseline stays correct.

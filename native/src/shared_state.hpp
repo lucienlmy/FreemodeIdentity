@@ -17,10 +17,10 @@
 // sides — a field added here but not in the C# mirror is the classic "spend didn't register"
 // bug.
 //
-// Ints are 4-byte; decorationBase is an 8-byte pointer placed LAST and 8-aligned (the six int32s
-// before it are an even count, so it lands on an 8-byte boundary with no padding). Version guards an
-// accidental layout mismatch.
-struct FreemodeWalletState {
+// Ints are 4-byte; the 8-byte pointers are placed LAST and 8-aligned (the six int32s before the first
+// land it on an 8-byte boundary with no padding; the waypoint array follows contiguously). Version
+// guards an accidental layout mismatch.
+struct ShimBridgeState {
 	int32_t version;          // = STATE_VERSION; C# checks it before trusting the block
 	int32_t redirectEnabled;  // C# -> shim: 1 = redirect the active wallet stat to us
 	int32_t activeStat;       // C# -> shim: the SP{N}_TOTAL_CASH joaat to redirect (0 = none)
@@ -28,6 +28,10 @@ struct FreemodeWalletState {
 	int32_t pendingDelta;     // shim -> C#: accumulated signed change (debit<0/income>0); C# zeroes it
 	int32_t logLevel;         // C# -> shim: log verbosity (0 = Info, 1 = Debug); ini [Logging] Level
 	uint64_t decorationBase;  // shim -> C#: ped-decoration array base resolved by .text scan (0 = none)
+	// shim -> C#: the four WaypointInfoArray entry addresses (Enhanced's array is unrolled into four
+	// separate globals, not a contiguous range). Each entry is { int modelHash; int blipHandle; ... };
+	// C# re-keys modelHash to follow the spoof. 0 in any slot = unresolved, C# skips the waypoint fix.
+	uint64_t waypointInfoArray[4];
 };
 
-constexpr int32_t FREEMODE_WALLET_STATE_VERSION = 2;
+constexpr int32_t SHIM_BRIDGE_STATE_VERSION = 3;

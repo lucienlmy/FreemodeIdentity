@@ -5,6 +5,7 @@
 #include "logger.hpp"
 #include "natives.hpp"
 #include "natives_legacy.hpp"
+#include "waypoint.hpp"
 #include "rage.hpp"
 #include "shared_state.hpp"
 
@@ -29,7 +30,7 @@ constexpr uint64_t XHASH_STAT_GET_INT = 0xDF7F16323520B858;
 
 // The shared bridge block. C# resolves its address (export below) and drives
 // redirectEnabled / activeStat / balance; the hooks read it. C# is the authority.
-FreemodeWalletState g_state = { FREEMODE_WALLET_STATE_VERSION, 0, 0, 0, 0, 0, 0 };
+ShimBridgeState g_state = { SHIM_BRIDGE_STATE_VERSION, 0, 0, 0, 0, 0, 0, {0, 0, 0, 0} };
 
 rage::scrNativeHandler g_origStatSetInt = nullptr;
 rage::scrNativeHandler g_origStatGetInt = nullptr;
@@ -226,6 +227,10 @@ bool Install() {
 	// even with the wallet off C# wants it for tattoo capture. 0 just means C# skips tattoos.
 	g_state.decorationBase = Decoration::ResolveArrayBase();
 
+	// Resolve the Enhanced WaypointInfoArray entries so C# can re-key the waypoint across an identity
+	// spoof. No-op on Legacy (C# finds the array itself). A miss just leaves zeros — C# skips the fix.
+	Waypoint::ResolveEntries(g_state.waypointInfoArray);
+
 	// Legacy: scrNativeRegistration table walk. Enhanced: the InitNativeTables resolver. Both
 	// editions key on the SAME translated hashes (XHASH_*) — they share crossmap column 27.
 	bool resolverReady = BuildEdition::IsLegacy() ? NativesLegacy::Init() : Natives::Init();
@@ -252,6 +257,6 @@ void Uninstall() {
 	MH_Uninitialize();
 }
 
-FreemodeWalletState* State() { return &g_state; }
+ShimBridgeState* State() { return &g_state; }
 
 } // namespace WalletHook
