@@ -198,11 +198,12 @@ commit builds and publishes a release - the tag is the version source of truth.
 ## For mod developers
 
 The wallet redirect hooks `STAT_GET_INT` and `STAT_SET_INT` on the active cash stat
-(`SP0`/`SP1`/`SP2_TOTAL_CASH`). So if your mod touches the player's money the conventional
+(`SP0`/`SP1`/`SP2_TOTAL_CASH`) **and** the matching bank stat
+(`SP0`/`SP1`/`SP2_BANK_BALANCE`). So if your mod touches the player's money the conventional
 way - `Game.Player.Money` (SHVDN), the equivalent `STAT_GET_INT`/`STAT_SET_INT` natives, or
-the cash stat directly - it works with Freemode Identity automatically: while spoofing is on,
-those reads and writes land on the wallet instead of the protagonist's real balance, with
-nothing extra to integrate.
+either of those stats directly - it works with Freemode Identity automatically: while spoofing
+is on, those reads and writes land on the wallet instead of the protagonist's real balance,
+with nothing extra to integrate. Cash and bank both resolve to the one wallet total.
 
 ## License
 
