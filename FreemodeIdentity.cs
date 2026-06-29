@@ -177,6 +177,10 @@ namespace FreemodeIdentity {
 		// default face/clothes), so neither the handle nor the model-hash clobber check sees it.
 		// The dead→alive EDGE is the only reliable signal, so we watch it and re-arm on revive.
 		bool WasDead;
+		// Same shape as death but invisible to every other signal: a bust doesn't kill the ped,
+		// swap the model or recreate the handle, yet the station walk-out resets the look like a
+		// hospital revive — and it's not a death, so WasDead never catches it. Hence its own edge.
+		bool WasArrested;
 		// True while we're waiting out the post-revive sequence before re-applying. The dead→alive
 		// edge fires, but the game then runs a walk-out cutscene that MOVES the player with control
 		// taken away; our re-apply does a real SET_PLAYER_MODEL (recreates the ped), and doing that
@@ -186,6 +190,13 @@ namespace FreemodeIdentity {
 		bool ReviveApplyPending;
 		int ReviveTimeoutMs = -1;
 		const int ReviveTimeoutGraceMs = 15000; // backstop if control never reads on
+		// When the safety gate (SwapBlockedReason) first started blocking a pending re-apply, and
+		// whether we've already logged the stuck wait once. The wait is indefinite by design (the
+		// look must stay defended), so a gate that never clears would otherwise be silent — we log
+		// it ONCE after the same grace window as the revive backstop so a misreporting modlist is
+		// diagnosable, not invisible.
+		int SwapBlockedSinceMs = -1;
+		bool SwapBlockedLogged;
 
 		bool SnapshotPending;
 
@@ -410,6 +421,24 @@ namespace FreemodeIdentity {
 				bool revived = WasDead && !isDead;
 				WasDead = isDead;
 
+				// Arrest edge — arg2 false asks for the busted state (held through the police-station
+				// screen), so the falling edge is the walk-out. The recovery is identical to a revive
+				// (look reset + control-off cutscene), so it rides the same revive handling below.
+				// Only polled when there's a look to defend — no point invoking the native (the one
+				// unconditional per-frame call here) for a recovery we'd never act on. Tracking is
+				// reset while off so re-enabling can't read a stale falling edge.
+				bool defendActive = Enabled && XmlAppearanceStorage.Exists(ActiveSlot);
+				bool isArrested = defendActive && player != null
+					&& GTA.Native.Function.Call<bool>(GTA.Native.Hash.IS_PLAYER_BEING_ARRESTED, Game.Player, false);
+				bool released = false;
+				if (defendActive) {
+					released = WasArrested && !isArrested;
+					WasArrested = isArrested;
+				} else {
+					WasArrested = false;
+				}
+				revived = revived || released;
+
 				// Auto-apply is NOT a one-shot: the game can wipe the look long after load, and we
 				// re-arm to restore it. The cooldown skips a just-applied swap that's still settling.
 				// Suspended in Edit Mode so external tools can change the ped without it snapping back.
@@ -452,15 +481,19 @@ namespace FreemodeIdentity {
 								ReviveApplyPending = true;
 								ReviveTimeoutMs = Game.GameTime + ReviveTimeoutGraceMs;
 							}
-							Logger.Log(revived ? "Active look clobbered (revived from death); re-applying once control returns."
+							Logger.Log(released ? "Active look clobbered (released from arrest); re-applying once control returns."
+								: revived ? "Active look clobbered (revived from death); re-applying once control returns."
 								: modelClobbered ? $"Active look clobbered (model now {player.Model.Hash:X8}, expected {active.Model}); re-applying."
 								: "Active look clobbered (player ped recreated — respawn); re-applying.");
 						}
 					}
 					if (!AutoApplyDone) {
 						// After a revive, hold the re-apply until the player is back IN CONTROL — the
-						// reliable end-of-cutscene signal (a backstop timeout releases it regardless so
-						// the look can't be lost). A model swap mid-cutscene spawns the ped underground.
+						// reliable end-of-cutscene signal. The backstop timeout only stops us waiting on
+						// CONTROL (a foreign respawn manager can hold control off indefinitely); it does
+						// NOT force the swap. The swap itself stays gated on SafeToSwapModel() via `stable`
+						// below, so the timeout can never fire a blind SET_PLAYER_MODEL into an unready
+						// world — the failure mode behind the reported void-fall / stuck black screen.
 						bool reviveHeld = false;
 						if (ReviveApplyPending) {
 							bool controlBack = player != null && Game.Player.CanControlCharacter;
@@ -472,7 +505,20 @@ namespace FreemodeIdentity {
 								reviveHeld = true;
 							}
 						}
-						bool stable = player != null && GTA.UI.Screen.IsFadedIn && !reviveHeld;
+						string swapBlocked = SwapBlockedReason();
+						bool stable = player != null && GTA.UI.Screen.IsFadedIn && !reviveHeld && swapBlocked == null;
+						// Surface a safety gate that stays shut for too long — the wait never gives up,
+						// so without this a modlist whose native misreports would just never re-apply.
+						if (swapBlocked != null) {
+							if (SwapBlockedSinceMs < 0) { SwapBlockedSinceMs = Game.GameTime; }
+							else if (!SwapBlockedLogged && Game.GameTime - SwapBlockedSinceMs >= ReviveTimeoutGraceMs) {
+								SwapBlockedLogged = true;
+								Logger.LogDebug($"Re-apply still waiting after {ReviveTimeoutGraceMs / 1000}s — {swapBlocked}.");
+							}
+						} else {
+							SwapBlockedSinceMs = -1;
+							SwapBlockedLogged = false;
+						}
 						if (!stable) {
 							SettleTicks = 0;
 						} else if (SettleTicks < SettleTarget) {
@@ -766,6 +812,10 @@ namespace FreemodeIdentity {
 					WornLook = ad;
 					LastAppliedPedHandle = Game.Player?.Character?.Handle ?? 0;
 					LastAutoApplyMs = Game.GameTime;
+					// A manual Apply during the post-revive walk-out would otherwise leave the backstop
+					// armed to fire a second, redundant swap ~15s later. (Only the timer — NOT AutoApplyDone,
+					// which the appearance-switch flow re-arms here on purpose.)
+					ReviveApplyPending = false;
 				}
 				if (!silent) {
 					if (ok) {
@@ -780,6 +830,22 @@ namespace FreemodeIdentity {
 					Fail("Couldn't apply appearance", "- see the log.");
 				}
 			}
+		}
+
+		// World-ready gate for a respawn re-apply. ReapplyWornLook's SET_PLAYER_MODEL recreates the
+		// ped, which is fatal if the spawn isn't streamed in yet: the ped drops through unloaded
+		// collision (the "void fall") or the respawn fade never completes (the "infinite black
+		// screen"), both reported on heavy modlists where a foreign respawn manager flips control/fade
+		// before the world is actually safe — so control+fade alone don't prove it's safe to swap.
+		// Returns the name of the first failing precondition, or null when safe — so a stuck wait can
+		// be logged with the reason instead of silently never re-applying.
+		string SwapBlockedReason() {
+			Ped p = Game.Player?.Character;
+			if (p == null || !p.Exists() || p.IsDead) return "ped not alive";
+			if (GTA.Native.Function.Call<bool>(GTA.Native.Hash.GET_IS_LOADING_SCREEN_ACTIVE)) return "loading screen";
+			if (!GTA.Native.Function.Call<bool>(GTA.Native.Hash.IS_PLAYER_PLAYING, Game.Player)) return "player not playing";
+			if (!GTA.Native.Function.Call<bool>(GTA.Native.Hash.HAS_COLLISION_LOADED_AROUND_ENTITY, p)) return "collision not loaded";
+			return null;
 		}
 
 		// Silent clobber re-assert. Re-applies the look actually worn (an applied backup, or the
