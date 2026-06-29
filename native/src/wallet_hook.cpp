@@ -30,7 +30,7 @@ constexpr uint64_t XHASH_STAT_GET_INT = 0xDF7F16323520B858;
 
 // The shared bridge block. C# resolves its address (export below) and drives
 // redirectEnabled / activeStat / balance; the hooks read it. C# is the authority.
-ShimBridgeState g_state = { SHIM_BRIDGE_STATE_VERSION, 0, 0, 0, 0, 0, 0, {0, 0, 0, 0} };
+ShimBridgeState g_state = { SHIM_BRIDGE_STATE_VERSION, 0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0, 0} };
 
 rage::scrNativeHandler g_origStatSetInt = nullptr;
 rage::scrNativeHandler g_origStatGetInt = nullptr;
@@ -84,9 +84,11 @@ bool WasRecentlyReported(int value) {
 }
 
 // Redirect this stat access to the wallet right now? Only when C# enabled redirect AND
-// this is the active wallet stat C# chose (the SPx the spoofed model resolves to).
+// this is one of the active wallet stats C# chose (the SPx cash or bank stat the spoofed
+// model resolves to). One wallet backs both, so either stat reads/charges the same total.
 bool ShouldRedirect(int statHash) {
-	return g_state.redirectEnabled != 0 && statHash != 0 && statHash == g_state.activeStat;
+	return g_state.redirectEnabled != 0 && statHash != 0
+	    && (statHash == g_state.activeStat || statHash == g_state.activeBankStat);
 }
 
 void HookStatSetInt(rage::scrNativeCallContext* ctx) {

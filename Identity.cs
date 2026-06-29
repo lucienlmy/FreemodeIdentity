@@ -45,6 +45,18 @@ namespace FreemodeIdentity {
 			}
 		}
 
+		// The SP{N}_BANK_BALANCE stat hash for this protagonist. Some mods charge the bank
+		// balance rather than on-hand cash; redirecting it too makes those draw the wallet.
+		// One wallet backs both stats, so a read/charge via either lands on the same total.
+		public static int WalletBankStat(string identity) {
+			switch (identity) {
+				case Michael: return unchecked((int)0x4F5E4A6C); // SP0_BANK_BALANCE
+				case Franklin: return unchecked((int)0x1363B3AE); // SP1_BANK_BALANCE
+				case Trevor: return unchecked((int)0xF1C9E930); // SP2_BANK_BALANCE
+				default: return 0;
+			}
+		}
+
 		// Which identity the live player ped currently reads as, by model hash. A freemode
 		// (or any non-protagonist) model is not one of the three.
 		public static string Current() {

@@ -63,9 +63,10 @@ makes money real.
 Because the wallet rides the protagonist's own cash stat, the rest of the game reads it
 as real money: **ATMs show the right balance**, and external job mods
 pay into and charge it correctly. Tested with
-[Casual Jobs (Rabbit Holes)](https://www.gta5-mods.com/scripts/casual-jobs-rabbit-holes)
-and [Driver Jobs V](https://www.gta5-mods.com/scripts/driverjobs-v) - job payouts land in
-the wallet while spoofed.
+[Casual Jobs (Rabbit Holes)](https://www.gta5-mods.com/scripts/casual-jobs-rabbit-holes),
+[Driver Jobs V](https://www.gta5-mods.com/scripts/driverjobs-v) and
+[Vehicle Market](https://www.gta5-mods.com/scripts/vehicle-market) - job payouts and
+vehicle purchases land on the wallet while spoofed.
 
 ## Install
 

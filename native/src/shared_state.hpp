@@ -17,16 +17,18 @@
 // sides — a field added here but not in the C# mirror is the classic "spend didn't register"
 // bug.
 //
-// Ints are 4-byte; the 8-byte pointers are placed LAST and 8-aligned (the six int32s before the first
-// land it on an 8-byte boundary with no padding; the waypoint array follows contiguously). Version
-// guards an accidental layout mismatch.
+// Ints are 4-byte; the 8-byte pointers are placed LAST and 8-aligned. The eight int32s before the
+// first pointer are an even count (32 bytes), so it lands on an 8-byte boundary with no padding; the
+// waypoint array follows contiguously. Version guards an accidental layout mismatch.
 struct ShimBridgeState {
 	int32_t version;          // = STATE_VERSION; C# checks it before trusting the block
-	int32_t redirectEnabled;  // C# -> shim: 1 = redirect the active wallet stat to us
+	int32_t redirectEnabled;  // C# -> shim: 1 = redirect the active wallet stats to us
 	int32_t activeStat;       // C# -> shim: the SP{N}_TOTAL_CASH joaat to redirect (0 = none)
+	int32_t activeBankStat;   // C# -> shim: the SP{N}_BANK_BALANCE joaat to redirect too (0 = none)
 	int32_t balance;          // C# -> shim: the live wallet total the shim mirrors + reports
 	int32_t pendingDelta;     // shim -> C#: accumulated signed change (debit<0/income>0); C# zeroes it
 	int32_t logLevel;         // C# -> shim: log verbosity (0 = Info, 1 = Debug); ini [Logging] Level
+	int32_t reserved;         // padding to an even int count so decorationBase stays 8-aligned
 	uint64_t decorationBase;  // shim -> C#: ped-decoration array base resolved by .text scan (0 = none)
 	// shim -> C#: the four WaypointInfoArray entry addresses (Enhanced's array is unrolled into four
 	// separate globals, not a contiguous range). Each entry is { int modelHash; int blipHandle; ... };
@@ -34,4 +36,4 @@ struct ShimBridgeState {
 	uint64_t waypointInfoArray[4];
 };
 
-constexpr int32_t SHIM_BRIDGE_STATE_VERSION = 3;
+constexpr int32_t SHIM_BRIDGE_STATE_VERSION = 4;

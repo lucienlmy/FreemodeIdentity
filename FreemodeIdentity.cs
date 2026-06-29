@@ -654,6 +654,7 @@ namespace FreemodeIdentity {
 			}
 			bool redirect = walletEnabled && spoof.Held;
 			int activeStat = redirect ? Identity.WalletStat(spoof.Target) : 0;
+			int activeBankStat = redirect ? Identity.WalletBankStat(spoof.Target) : 0;
 
 			if (redirect != redirectLogged) {
 				redirectLogged = redirect;
@@ -672,7 +673,7 @@ namespace FreemodeIdentity {
 				Logger.Log($"{(delta < 0 ? "Debit" : "Income")} ${Math.Abs(delta)} via shim -> wallet ${wallet.Balance}.");
 			}
 
-			shim.Push(redirect, activeStat, wallet.Balance, logLevel <= LogLevel.Debug ? 1 : 0);
+			shim.Push(redirect, activeStat, activeBankStat, wallet.Balance, logLevel <= LogLevel.Debug ? 1 : 0);
 		}
 
 		// === Appearance: snapshot / apply (from AppearanceKeeper) ==========================

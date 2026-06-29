@@ -6,8 +6,9 @@ namespace FreemodeIdentity {
 	// handlers, so the shim does the STAT spend-redirect; this side drives it. The shim
 	// exports FreemodeIdentity_GetState() returning a pointer to a shared block:
 	//
-	//   struct { int version; int redirectEnabled; int activeStat; int balance; int pendingDelta;
-	//            int logLevel; ulong decorationBase; ulong waypointInfoArray[4]; }
+	//   struct { int version; int redirectEnabled; int activeStat; int activeBankStat; int balance;
+	//            int pendingDelta; int logLevel; int reserved; ulong decorationBase;
+	//            ulong waypointInfoArray[4]; }
 	//
 	// C# is the authority: we write redirectEnabled / activeStat / balance. Money events come
 	// back as `pendingDelta` — a signed change the shim ACCUMULATES (shop debit < 0, script
@@ -16,20 +17,22 @@ namespace FreemodeIdentity {
 	// spending / redirected payouts are unavailable.
 	internal sealed class ShimBridge {
 		const string AsiName = "FreemodeIdentity.asi";
-		const int ExpectedVersion = 3;
+		const int ExpectedVersion = 4;
 
-		// Field byte offsets in the shared struct. Six 4-byte ints, then 8-byte pointers on their
-		// natural 8-byte boundary (even int count before the first ⇒ no padding): decorationBase, then
-		// the four waypointInfoArray entry addresses contiguously.
+		// Field byte offsets in the shared struct. Eight 4-byte ints (one a reserved pad), then 8-byte
+		// pointers on their natural 8-byte boundary: decorationBase, then the four waypointInfoArray
+		// entry addresses contiguously.
 		const int OffVersion = 0;
 		const int OffRedirect = 4;
 		const int OffActiveStat = 8;
-		const int OffBalance = 12;
-		const int OffPendingDelta = 16;
-		const int OffLogLevel = 20;
-		const int OffDecorationBase = 24;
-		const int OffWaypointArray = 32; // four 8-byte addresses at 32/40/48/56
-		const int StateSize = 64;
+		const int OffActiveBankStat = 12;
+		const int OffBalance = 16;
+		const int OffPendingDelta = 20;
+		const int OffLogLevel = 24;
+		// 28 = reserved pad
+		const int OffDecorationBase = 32;
+		const int OffWaypointArray = 40; // four 8-byte addresses at 40/48/56/64
+		const int StateSize = 72;
 
 		[DllImport("kernel32.dll", CharSet = CharSet.Ansi)]
 		static extern IntPtr GetModuleHandle(string name);
@@ -87,11 +90,13 @@ namespace FreemodeIdentity {
 
 		// Push the current feature state + balance to the shim before each potential shop
 		// interaction. redirect=true only when the wallet is enabled AND spoofed to the
-		// protagonist whose stat is activeStat. logLevel drives the shim's trace (0=Info,1=Debug).
-		public void Push(bool redirect, int activeStat, int balance, int logLevel) {
+		// protagonist whose stats are activeStat (cash) + activeBankStat (bank — some mods charge
+		// the bank instead). logLevel drives the shim's trace (0=Info,1=Debug).
+		public void Push(bool redirect, int activeStat, int activeBankStat, int balance, int logLevel) {
 			if (state == IntPtr.Zero) return;
 			Marshal.WriteInt32(state, OffRedirect, redirect ? 1 : 0);
 			Marshal.WriteInt32(state, OffActiveStat, activeStat);
+			Marshal.WriteInt32(state, OffActiveBankStat, activeBankStat);
 			Marshal.WriteInt32(state, OffBalance, balance);
 			Marshal.WriteInt32(state, OffLogLevel, logLevel);
 		}
