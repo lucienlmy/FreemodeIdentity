@@ -467,6 +467,10 @@ namespace FreemodeIdentity {
 				// The Appearance enabler is the exception: it does an immediate model swap, so it's greyed
 				// while a swap is settling (its own SetEnabled also no-ops the swap while the master is off).
 				if (EnabledItem != null) EnabledItem.Enabled = !appearanceSwitching;
+				// The master switch also drives an immediate swap (active revert / re-arm), so grey it
+				// during the same settle window — mashing it mid-swap could otherwise interleave with the
+				// in-flight apply/return and break the ordering.
+				if (MasterEnabledItem != null) MasterEnabledItem.Enabled = !appearanceSwitching;
 				// Loadout children grey only on their own feature flag (within-feature behaviour), not the
 				// master — they're config the user can set up while the mod is off.
 				if (LoadoutWeaponsItem != null) LoadoutWeaponsItem.Enabled = loadoutEnabled;
@@ -1629,13 +1633,22 @@ namespace FreemodeIdentity {
 		// is persisted — so the prior configuration is restored intact when toggled back on.
 		void SetMasterEnabled(bool on) {
 			if (on == masterEnabled) return;
+			// A swap is mid-flight. Greying the item only dims it — LemonUI still flips Checked and fires
+			// this on a press — so REVERT the checkbox and bail BEFORE touching state. The old code
+			// flipped + persisted masterEnabled and only then returned, so a press during the window
+			// changed the saved state without doing the matching swap, desyncing the world from the
+			// master flag (and mashing could interleave with the in-flight swap).
+			if (appearanceSwitching) {
+				if (MasterEnabledItem != null) MasterEnabledItem.Checked = masterEnabled;
+				return;
+			}
 			masterEnabled = on;
 			Config.SetValue("General", "Enabled", masterEnabled);
 			Config.Save();
 			if (MasterEnabledItem != null) MasterEnabledItem.Checked = masterEnabled;
 
-			if (SnapshotInProgress || appearanceSwitching) {
-				return; // a swap is mid-flight; let it finish — the gates pick up the new master state next tick
+			if (SnapshotInProgress) {
+				return; // a snapshot is capturing; let it finish — the gates pick up the new master state next tick
 			}
 
 			if (!on) {
