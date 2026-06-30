@@ -43,6 +43,10 @@ namespace FreemodeIdentity {
 		// --- Loadout (weapons/armor/health a freemode ped loses) --------------------------
 		readonly Loadout loadout = new Loadout();
 
+		// --- Skills (a user-set skill profile; they don't progress on their own) ----------
+		readonly Skills skills = new Skills();
+		bool skillsEnabled;
+
 		// === Menu ==========================================================================
 		// The tree: MainMenu holds the two master checkboxes + the Appearance/Wallet anchors;
 		// every other control nests under one of those two. *MenuItem fields are the anchors,
@@ -75,6 +79,11 @@ namespace FreemodeIdentity {
 		NativeCheckboxItem LoadoutArmorItem;
 		NativeCheckboxItem LoadoutHealthItem;
 		NativeListItem<string> LoadoutPeriodItem;
+
+		NativeMenu SkillsMenu;               // Skills ▸ — a user-set skill profile (don't progress on their own)
+		NativeItem SkillsMenuItem;
+		NativeCheckboxItem SkillsEnabledItem;
+		NativeListItem<int>[] SkillItems;
 
 		NativeMenu DebugMenu;                 // Debug ▸ — log level + live identity read-outs
 		NativeListItem<string> LogLevelItem;
@@ -278,6 +287,7 @@ namespace FreemodeIdentity {
 			earning = new Earning(wallet);
 			wallet.Load();
 			loadout.Load();
+			skills.Load();
 			Logger.LogBanner($"Config: edition={GameBuild.Current} enabled={Enabled} wallet={walletEnabled} earning={earningEnabled} spoof={spoofEnabled} target={spoofTarget} menuKey={menuKey}.");
 
 			XmlAppearanceStorage.Initialize(ScriptPaths.DataDirectory);
@@ -295,6 +305,7 @@ namespace FreemodeIdentity {
 		//   [ManualSave] MovingStyle, Tattoos, Mood
 		//   [Wallet]     Enabled, Earning
 		//   [Loadout]    Enabled, Weapons, Armor, Health, SavePeriodSeconds
+		//   [Skills]     Enabled  (the skill values live in skills.dat, not here)
 		//   [Spoof]      Enabled, Target
 		//   [State]      ActiveSlot, SourceModel, SpoofSourceHash
 		void LoadConfig() {
@@ -335,6 +346,10 @@ namespace FreemodeIdentity {
 			int periodSec = Config.GetValue("Loadout", "SavePeriodSeconds", 2);
 			loadoutSavePeriodMs = NearestLoadoutPeriodMs(periodSec * 1000);
 
+			// Default OFF: an unset profile is all-zeros, so applying it on an untouched install would
+			// force skills to 0 — worse than leaving them. Only enforce once the user opts in.
+			skillsEnabled = Config.GetValue("Skills", "Enabled", false);
+
 			spoofEnabled = Config.GetValue("Spoof", "Enabled", false);
 			spoofTarget = Config.GetValue("Spoof", "Target", Identity.Franklin);
 			if (Array.IndexOf(Identity.All, spoofTarget) < 0) {
@@ -362,6 +377,7 @@ namespace FreemodeIdentity {
 			Config.SetValue("Loadout", "Armor", loadoutArmor);
 			Config.SetValue("Loadout", "Health", loadoutHealth);
 			Config.SetValue("Loadout", "SavePeriodSeconds", loadoutSavePeriodMs / 1000);
+			Config.SetValue("Skills", "Enabled", skillsEnabled);
 			Config.SetValue("Spoof", "Enabled", spoofEnabled);
 			Config.SetValue("Spoof", "Target", spoofTarget);
 			Config.SetValue("State", "ActiveSlot", ActiveSlot);
@@ -435,6 +451,8 @@ namespace FreemodeIdentity {
 				if (LoadoutArmorItem != null) LoadoutArmorItem.Enabled = loadoutEnabled;
 				if (LoadoutHealthItem != null) LoadoutHealthItem.Enabled = loadoutEnabled;
 				if (LoadoutPeriodItem != null) LoadoutPeriodItem.Enabled = loadoutEnabled;
+				// The Skills submenu stays usable with the master off — setting a value just stores it for
+				// when you turn the feature on, so the setters aren't greyed.
 				if (SnapshotItem != null) SnapshotItem.Enabled = !busy;
 				bool hasActiveSlot = !string.IsNullOrEmpty(ActiveSlot) && XmlAppearanceStorage.Exists(ActiveSlot);
 				if (OverwriteActiveItem != null) OverwriteActiveItem.Enabled = !busy && hasActiveSlot;
@@ -622,7 +640,15 @@ namespace FreemodeIdentity {
 				// Edit Mode blocks it: the spoof paints the model hash every tick and would fight
 				// external ped edits (intent is kept and re-engages when Edit is turned off).
 				bool retryCooling = autoSpoofRetryMs >= 0 && Game.GameTime - autoSpoofRetryMs < AutoSpoofRetryCooldownMs;
-				if (spoofEnabled && !EditMode && !spoof.Held && !retryCooling && AutoSpoofReady()) {
+				// Don't re-engage through the death/arrest respawn. The edge above drops the spoof so the
+				// respawn streams a clean body, but right then the ped still reads as a settled faded-in
+				// freemode body, so AutoSpoofReady would re-paint the protagonist hash onto the model-info
+				// mid-respawn and re-poison it — the infinite-load bug, re-armed by our own re-engage.
+				// isDead/isArrested cover the busted-and-respawning windows (the rising edges); the
+				// ReviveApplyPending half covers the walk-out wait after either. The normal settle-gated
+				// engage takes over once the look is back.
+				bool reviveInFlight = isDead || isArrested || ReviveApplyPending;
+				if (spoofEnabled && !EditMode && !spoof.Held && !retryCooling && !reviveInFlight && AutoSpoofReady()) {
 					Logger.LogDebug($"Auto-spoof gate ready (current={Identity.Current() ?? "freemode"}) — engaging {spoofTarget}.");
 					// Pass the live ped's real freemode hash so Start can self-heal a stranded poison
 					// (a protagonist hash left on the shared freemode model-info) instead of refusing
@@ -755,6 +781,23 @@ namespace FreemodeIdentity {
 			}
 
 			shim.Push(redirect, activeStat, activeBankStat, wallet.Balance, logLevel <= LogLevel.Debug ? 1 : 0);
+
+			// Pin the skill profile: the shim masks the skill GET to our value AND re-asserts it into the
+			// real stat memory each frame (the native path alone gets reverted; the gameplay code reads
+			// the real stat object). Gated on Skills-enabled AND spoofed (a genuine protagonist is never
+			// masked); push a cleared set otherwise so no stale profile lingers.
+			bool pinSkills = skillsEnabled && spoof.Held;
+			int skillsChar = pinSkills ? Identity.CharIndex(spoof.Target) : -1;
+			shim.PushSkills(pinSkills, skills.HashesFor(skillsChar), skills.Values());
+
+			// Our memory write makes a skill value differ from the protagonist's saved profile, which
+			// stats_controller.ysc treats as a skill-up and posts a sticky THEFEED stats widget (the
+			// "Stamina + 100/100" portrait bar). It's not a HUD_COMPONENT and survives THEFEED_PAUSE, so
+			// the only lever is flushing the feed queue — and it must be continuous while pinned, since
+			// the script re-posts it. Scoped to pinned-and-spoofed so normal toasts are untouched otherwise.
+			if (pinSkills) {
+				GTA.Native.Function.Call(GTA.Native.Hash.THEFEED_FLUSH_QUEUE);
+			}
 		}
 
 		// === Loadout: sample + restore weapons/armor/health ===============================
@@ -770,6 +813,11 @@ namespace FreemodeIdentity {
 		// stored loadout with nothing — the "loadout gone after load" bug. Gating sampling on a completed
 		// restore guarantees the store is replayed before we ever capture from the loaded ped.
 		bool loadoutRestoredOnce;
+
+		// The skill profile isn't applied here — SyncShim pushes it to the native shim every tick, and the
+		// shim redirects the skill stat reads to it (the only thing that holds against the game reverting
+		// a managed write). So there's nothing to "apply" on the apply paths or the spoof edge; the push
+		// is continuous. See ShimBridge.PushSkills and Skills.cs.
 
 		// Replay the saved loadout onto the live player ped. Called after an apply recreates the ped (it
 		// spawns bare). Weapons always (gated by their toggle); vitals only when the caller says so (cold
@@ -1458,7 +1506,7 @@ namespace FreemodeIdentity {
 		bool AnyMenuVisible() =>
 			MainMenu.Visible || AppearanceMenu.Visible || SlotsMenu.Visible
 			|| ManualMenu.Visible || WalletMenu.Visible || SpoofMenu.Visible
-			|| LoadoutMenu.Visible || DebugMenu.Visible;
+			|| LoadoutMenu.Visible || SkillsMenu.Visible || DebugMenu.Visible;
 
 		void OnKeyDown(object sender, KeyEventArgs e) {
 			// Match the key + its Shift/Ctrl/Alt modifiers, but MASK OFF other flags Windows
@@ -1478,6 +1526,7 @@ namespace FreemodeIdentity {
 				WalletMenu.Visible = false;
 				SpoofMenu.Visible = false;
 				LoadoutMenu.Visible = false;
+				SkillsMenu.Visible = false;
 				DebugMenu.Visible = false;
 			} else {
 				MainMenu.Visible = true;
@@ -1507,6 +1556,12 @@ namespace FreemodeIdentity {
 			LoadoutEnabledItem.CheckboxChanged += (s, a) => SetLoadoutEnabled(LoadoutEnabledItem.Checked);
 			MainMenu.Add(LoadoutEnabledItem);
 
+			SkillsEnabledItem = new NativeCheckboxItem("Skills Enabled",
+				"Applies your chosen skill profile (strength, stamina, shooting...) when your look is applied. Set the values in Skills.",
+				skillsEnabled);
+			SkillsEnabledItem.CheckboxChanged += (s, a) => SetSkillsEnabled(SkillsEnabledItem.Checked);
+			MainMenu.Add(SkillsEnabledItem);
+
 			SpoofItem = new NativeCheckboxItem("Spoofing Enabled",
 				"~y~Required for a fully working wallet.~s~ Reads you as a protagonist so shops open, jobs pay out, and charges route to your wallet. Off = shops stay closed, and spending draws the protagonist's cash without changing their real balance.",
 				spoofEnabled);
@@ -1516,6 +1571,7 @@ namespace FreemodeIdentity {
 			BuildAppearanceMenu();
 			BuildWalletMenu();
 			BuildLoadoutMenu();
+			BuildSkillsMenu();
 			BuildSpoofMenu();
 			BuildDebugMenu();
 
@@ -1681,6 +1737,61 @@ namespace FreemodeIdentity {
 				Config.Save();
 			};
 			LoadoutMenu.Add(LoadoutPeriodItem);
+		}
+
+		// Skills master toggle. Off leaves skills untouched (an unset profile is all-zeros, so applying
+		// it would zero a fresh char's skills). On enforces the chosen profile on every look apply.
+		void SetSkillsEnabled(bool on) {
+			if (on == skillsEnabled) return;
+			skillsEnabled = on;
+			Config.SetValue("Skills", "Enabled", skillsEnabled);
+			Config.Save();
+			if (SkillsEnabledItem != null) SkillsEnabledItem.Checked = skillsEnabled;
+			// No immediate apply needed: SyncShim pushes the pin state to the shim every tick, so flipping
+			// this takes effect on the next tick. Turning off un-pins (skill reads pass through to the real
+			// protagonist values again); the game keeps whatever was last read.
+		}
+
+		// 0,5,10..100 — the per-skill setter scale (steps of 5, starting at 0). Both the option values
+		// and the displayed labels.
+		static readonly int[] SkillSteps = BuildSkillSteps();
+		static int[] BuildSkillSteps() {
+			var steps = new int[21];
+			for (int i = 0; i < steps.Length; i++) steps[i] = i * 5;
+			return steps;
+		}
+
+		void BuildSkillsMenu() {
+			SkillsMenu = new NativeMenu("Skills", "Skills");
+			Pool.Add(SkillsMenu);
+			SkillsMenuItem = MainMenu.AddSubMenu(SkillsMenu);
+			SkillsMenuItem.Description = "Set your character's skill levels. They don't level up on their own, so set them here. The master switch is on the main menu.";
+
+			// One scrollable 0..100 setter per skill. Scrolling sets the stored value (and the live stat
+			// if we're spoofed), so a change shows in-game at once. NativeListItem<int> renders the int
+			// directly as the label.
+			SkillItems = new NativeListItem<int>[skills.Count];
+			for (int i = 0; i < skills.Count; i++) {
+				int skill = i; // capture for the closure
+				var item = new NativeListItem<int>(Skills.Labels[i], SkillSteps);
+				item.SelectedIndex = NearestSkillStepIndex(skills.Get(i));
+				item.ItemChanged += (s, a) => SetSkill(skill, SkillSteps[SkillItems[skill].SelectedIndex]);
+				SkillsMenu.Add(item);
+				SkillItems[i] = item;
+			}
+		}
+
+		// Snap a stored value (which a hand-edited skills.dat could set to any 0..100) to the nearest
+		// 5-step so the list item lands on a real option.
+		static int NearestSkillStepIndex(int value) {
+			int idx = (value + 2) / 5; // round to nearest step
+			return Math.Max(0, Math.Min(SkillSteps.Length - 1, idx));
+		}
+
+		// Persist a skill choice. SyncShim pushes the updated profile to the shim next tick, so a change
+		// shows in-game at once while spoofed + enabled (the shim redirects the GET to the new value).
+		void SetSkill(int skill, int value) {
+			skills.Set(skill, value);
 		}
 
 		// Models the Force Model escape hatch can swap to, label -> model name. Order matches

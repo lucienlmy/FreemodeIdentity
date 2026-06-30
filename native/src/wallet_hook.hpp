@@ -12,6 +12,12 @@ namespace WalletHook {
 bool Install();
 void Uninstall();
 
+// Per-frame pump, called from the shim's script fiber. Re-asserts the pinned skill values
+// directly into stat memory every frame — the game reads the real stat object for gameplay
+// (sprint exhaustion etc.) and may not call STAT_GET_INT at all, so the GET hook alone can't
+// hold a skill. Runs on the game thread (safe for the vfunc call). No-op unless skills are pinned.
+void TickPinnedSkills();
+
 // The shared bridge block (see shared_state.hpp). Exported to C# via dllmain.
 ShimBridgeState* State();
 

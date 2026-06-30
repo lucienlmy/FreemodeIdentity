@@ -5,6 +5,7 @@
 #include "logger.hpp"
 #include "natives.hpp"
 #include "natives_legacy.hpp"
+#include "stats.hpp"
 #include "waypoint.hpp"
 #include "rage.hpp"
 #include "shared_state.hpp"
@@ -29,8 +30,31 @@ constexpr uint64_t XHASH_STAT_SET_INT = 0x1164A75E490C27B6;
 constexpr uint64_t XHASH_STAT_GET_INT = 0xDF7F16323520B858;
 
 // The shared bridge block. C# resolves its address (export below) and drives
-// redirectEnabled / activeStat / balance; the hooks read it. C# is the authority.
-ShimBridgeState g_state = { SHIM_BRIDGE_STATE_VERSION, 0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0, 0} };
+// redirectEnabled / activeStat / balance / the skill profile; the hooks read it. C# is the authority.
+ShimBridgeState g_state = {
+	SHIM_BRIDGE_STATE_VERSION,
+	0, 0, 0, 0, 0, 0, 0,       // redirectEnabled..reserved
+	0, {0, 0, 0, 0, 0, 0, 0},  // skillsPinned, skillHashes[7]
+	{0, 0, 0, 0, 0, 0, 0}, 0,  // skillValues[7], reserved2
+	0,                         // decorationBase
+	{0, 0, 0, 0},              // waypointInfoArray[4]
+};
+
+// Match a stat hash against the pinned skill set; returns its profile value via `out` and true if
+// pinned. Pinning is gated by C# on Skills-enabled AND spoofed, so a genuine protagonist (both off)
+// is never masked.
+bool TryPinnedSkill(int statHash, int* out) {
+	if (g_state.skillsPinned == 0 || statHash == 0) {
+		return false;
+	}
+	for (int i = 0; i < SHIM_SKILL_COUNT; ++i) {
+		if (g_state.skillHashes[i] == statHash) {
+			*out = g_state.skillValues[i];
+			return true;
+		}
+	}
+	return false;
+}
 
 rage::scrNativeHandler g_origStatSetInt = nullptr;
 rage::scrNativeHandler g_origStatGetInt = nullptr;
@@ -94,6 +118,14 @@ bool ShouldRedirect(int statHash) {
 void HookStatSetInt(rage::scrNativeCallContext* ctx) {
 	// STAT_SET_INT(int statHash, int value, BOOL save)
 	int statHash = ctx->GetArg<int>(0);
+	int pinned;
+	if (TryPinnedSkill(statHash, &pinned)) {
+		// Swallow the write: the game's stat system keeps reverting skill writes back to the real
+		// protagonist's saved values, so dropping the SET (and answering the GET below from our
+		// profile) is what makes the chosen skills actually hold. Our own initial set comes through
+		// the same hook but is equally unnecessary — the GET redirect is the source of truth.
+		return;
+	}
 	if (ShouldRedirect(statHash)) {
 		int value = ctx->GetArg<int>(1);
 		int save = ctx->GetArg<int>(2);
@@ -137,6 +169,17 @@ void HookStatGetInt(rage::scrNativeCallContext* ctx) {
 	// affordability. Let the original run (sets the success return + the real value),
 	// then overwrite the out-param with our balance.
 	int statHash = ctx->GetArg<int>(0);
+	int pinnedSkill;
+	if (TryPinnedSkill(statHash, &pinnedSkill)) {
+		// Report our profile value to STAT_GET_INT callers. The actual memory re-assert is done by
+		// TickPinnedSkills() on the script fiber every frame — independent of whether the game calls
+		// this native at all (the gameplay code reads the real stat object directly, and may never
+		// poll via STAT_GET_INT for a given skill). Here we only mask the native's out-param.
+		g_origStatGetInt(ctx);
+		if (int* out = ctx->GetArg<int*>(1))
+			*out = pinnedSkill;
+		return;
+	}
 	if (ShouldRedirect(statHash)) {
 		int value = g_state.balance;
 		g_origStatGetInt(ctx);
@@ -233,6 +276,11 @@ bool Install() {
 	// spoof. No-op on Legacy (C# finds the array itself). A miss just leaves zeros — C# skips the fix.
 	Waypoint::ResolveEntries(g_state.waypointInfoArray);
 
+	// Resolve the character-stats array for the skill memory-write (the only way to hold a skill value
+	// against the manager's reversion — the native path can't). A miss just disables skill pinning's
+	// memory re-assert; the GET-mask still works. Independent of the STAT hooks below.
+	Stats::Init();
+
 	// Legacy: scrNativeRegistration table walk. Enhanced: the InitNativeTables resolver. Both
 	// editions key on the SAME translated hashes (XHASH_*) — they share crossmap column 27.
 	bool resolverReady = BuildEdition::IsLegacy() ? NativesLegacy::Init() : Natives::Init();
@@ -248,6 +296,21 @@ bool Install() {
 	g_installed = ok;
 	Logger::Log(ok ? "shim: hooks installed." : "shim: install incomplete — see failures.");
 	return ok;
+}
+
+void TickPinnedSkills() {
+	if (g_state.skillsPinned == 0)
+		return;
+	for (int i = 0; i < SHIM_SKILL_COUNT; ++i) {
+		int hash = g_state.skillHashes[i];
+		if (hash == 0)
+			continue;
+		// Re-assert every frame: the game's gameplay code reads the live stat object directly (sprint
+		// exhaustion etc.) and may never poll STAT_GET_INT, so the value must be kept written in memory.
+		// The write holds once set (the manager doesn't revert a vfunc write), so this is a cheap no-op
+		// after the first frame; the cost is the WriteInt itself, with the table lookup cached.
+		Stats::WriteInt(static_cast<uint32_t>(hash), g_state.skillValues[i]);
+	}
 }
 
 void Uninstall() {

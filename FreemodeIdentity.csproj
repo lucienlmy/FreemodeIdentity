@@ -79,6 +79,7 @@
     <Compile Include="WaypointKeeper.cs" />
     <Compile Include="Wallet.cs" />
     <Compile Include="Loadout.cs" />
+    <Compile Include="Skills.cs" />
     <Compile Include="ShimBridge.cs" />
     <Compile Include="Earning.cs" />
     <!-- The unified Script. -->

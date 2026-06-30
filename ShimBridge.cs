@@ -7,21 +7,23 @@ namespace FreemodeIdentity {
 	// exports FreemodeIdentity_GetState() returning a pointer to a shared block:
 	//
 	//   struct { int version; int redirectEnabled; int activeStat; int activeBankStat; int balance;
-	//            int pendingDelta; int logLevel; int reserved; ulong decorationBase;
-	//            ulong waypointInfoArray[4]; }
+	//            int pendingDelta; int logLevel; int reserved;
+	//            int skillsPinned; int skillHashes[7]; int skillValues[7]; int reserved2;
+	//            ulong decorationBase; ulong waypointInfoArray[4]; }
 	//
-	// C# is the authority: we write redirectEnabled / activeStat / balance. Money events come
-	// back as `pendingDelta` — a signed change the shim ACCUMULATES (shop debit < 0, script
-	// payout > 0) which we apply + zero each tick. If the shim isn't loaded (user hasn't
-	// installed the .asi), Available is false and the wallet still earns — only in-shop
-	// spending / redirected payouts are unavailable.
+	// C# is the authority: we write redirectEnabled / activeStat / balance, and the skill profile
+	// (skillsPinned + the active SP{N} hashes + values). Money events come back as `pendingDelta` — a
+	// signed change the shim ACCUMULATES (shop debit < 0, script payout > 0) which we apply + zero each
+	// tick. If the shim isn't loaded (user hasn't installed the .asi), Available is false and the
+	// wallet still earns — only in-shop spending / redirected payouts / skill pinning are unavailable.
 	internal sealed class ShimBridge {
 		const string AsiName = "FreemodeIdentity.asi";
-		const int ExpectedVersion = 4;
+		const int ExpectedVersion = 5;
+		const int SkillCount = 7; // must match SHIM_SKILL_COUNT on the native side
 
-		// Field byte offsets in the shared struct. Eight 4-byte ints (one a reserved pad), then 8-byte
-		// pointers on their natural 8-byte boundary: decorationBase, then the four waypointInfoArray
-		// entry addresses contiguously.
+		// Field byte offsets in the shared struct. The int32 region (an even count so the pointers stay
+		// 8-aligned): eight wallet/log ints, then the skill block (pinned + 7 hashes + 7 values + a pad),
+		// then the 8-byte pointers: decorationBase, then the four waypointInfoArray entries contiguously.
 		const int OffVersion = 0;
 		const int OffRedirect = 4;
 		const int OffActiveStat = 8;
@@ -30,9 +32,13 @@ namespace FreemodeIdentity {
 		const int OffPendingDelta = 20;
 		const int OffLogLevel = 24;
 		// 28 = reserved pad
-		const int OffDecorationBase = 32;
-		const int OffWaypointArray = 40; // four 8-byte addresses at 40/48/56/64
-		const int StateSize = 72;
+		const int OffSkillsPinned = 32;
+		const int OffSkillHashes = 36;  // 7 ints at 36..60
+		const int OffSkillValues = 64;  // 7 ints at 64..88
+		// 92 = reserved2 pad
+		const int OffDecorationBase = 96;
+		const int OffWaypointArray = 104; // four 8-byte addresses at 104/112/120/128
+		const int StateSize = 136;
 
 		[DllImport("kernel32.dll", CharSet = CharSet.Ansi)]
 		static extern IntPtr GetModuleHandle(string name);
@@ -99,6 +105,20 @@ namespace FreemodeIdentity {
 			Marshal.WriteInt32(state, OffActiveBankStat, activeBankStat);
 			Marshal.WriteInt32(state, OffBalance, balance);
 			Marshal.WriteInt32(state, OffLogLevel, logLevel);
+		}
+
+		// Push the skill profile the shim pins. `pin` is true only when Skills is enabled AND spoofed
+		// (so a genuine protagonist is never masked). `hashes`/`values` are the active SP{N} skill
+		// hashes for the spoof target and the chosen 0..100 values, both length SkillCount. When pin is
+		// false the shim ignores the rest, but we still write a cleared set so a stale profile can't
+		// linger. No-op if the shim isn't connected (skills then can't be pinned — they won't hold).
+		public void PushSkills(bool pin, int[] hashes, int[] values) {
+			if (state == IntPtr.Zero) return;
+			Marshal.WriteInt32(state, OffSkillsPinned, pin ? 1 : 0);
+			for (int i = 0; i < SkillCount; i++) {
+				Marshal.WriteInt32(state, OffSkillHashes + i * 4, hashes != null && i < hashes.Length ? hashes[i] : 0);
+				Marshal.WriteInt32(state, OffSkillValues + i * 4, values != null && i < values.Length ? values[i] : 0);
+			}
 		}
 
 		// The ped-decoration array base the shim resolved from the live .text (0 if it couldn't, or

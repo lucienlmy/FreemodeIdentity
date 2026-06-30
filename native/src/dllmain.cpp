@@ -32,10 +32,13 @@ void ScriptMain() {
 	Logger::Logf("shim: world ready (%s edition) — installing hooks.", BuildEdition::Name());
 	g_hooksInstalled = WalletHook::Install();
 
-	// Nothing per-frame: the redirect lives entirely in the STAT hooks, driven by the
-	// shared state C# writes. Just keep the fiber alive.
-	while (true)
+	// The cash redirect lives entirely in the STAT hooks (driven by the shared state C# writes),
+	// but the skill pin needs a per-frame memory re-assert that doesn't depend on the game polling
+	// STAT_GET_INT — so pump it here on the script fiber (the game thread, safe for the stat vfunc).
+	while (true) {
+		WalletHook::TickPinnedSkills();
 		scriptWait(0);
+	}
 }
 
 } // namespace
