@@ -51,6 +51,16 @@ namespace FreemodeIdentity {
 		int skillFlushUntilMs = -1;
 		const int SkillFlushTrailMs = 1500;
 
+		// --- Penalties (story-mode death/arrest costs, simulated on the freemode char) -----
+		// We drop the spoof on the death/arrest edge so the respawn streams clean, which means the
+		// game's own protagonist penalties never land. So we replay the cash cost out of the wallet:
+		// floor(pct% of cash) clamped to a cap. (Weapon/armor confiscation was dropped — while spoofed
+		// the game continuously re-grants a protagonist's ammo, so it can't hold without per-frame pinning.)
+		bool penaltiesEnabled;
+		int penaltyPercent;       // % of the wallet a fee takes (SP uses 5)
+		int penaltyDeathCap;      // max death (healthcare) fee (SP $5,000)
+		int penaltyBustCap;       // max bust (bail) fee; raised above SP's $300 to sting without confiscation
+
 		// === Menu ==========================================================================
 		// The tree: MainMenu holds the two master checkboxes + the Appearance/Wallet anchors;
 		// every other control nests under one of those two. *MenuItem fields are the anchors,
@@ -333,6 +343,7 @@ namespace FreemodeIdentity {
 		//   [Wallet]     Enabled, Earning
 		//   [Loadout]    Enabled, Weapons, Armor, Health, SavePeriodSeconds
 		//   [Skills]     Enabled  (the skill values live in skills.dat, not here)
+		//   [Penalties]  Enabled, Percent, DeathFeeCap, BustFineCap
 		//   [Spoof]      Enabled, Target
 		//   [State]      ActiveSlot, SourceModel, SpoofSourceHash
 		// [General] Enabled is the master switch and deliberately the first key in the file.
@@ -379,6 +390,15 @@ namespace FreemodeIdentity {
 			// force skills to 0 — worse than leaving them. Only enforce once the user opts in.
 			skillsEnabled = Config.GetValue("Skills", "Enabled", false);
 
+			// Default ON: an enabled wallet should feel like real SP money, so death/arrest cost something
+			// out of the box (gated on the wallet being active anyway). Ini-only — no menu toggle. Percent
+			// and caps default to the authentic SP values; a hand-edited ini is clamped sane so a typo
+			// can't make a fee negative or absurd.
+			penaltiesEnabled = Config.GetValue("Penalties", "Enabled", true);
+			penaltyPercent = Math.Min(100, Math.Max(0, Config.GetValue("Penalties", "Percent", 5)));
+			penaltyDeathCap = Math.Max(0, Config.GetValue("Penalties", "DeathFeeCap", 5000));
+			penaltyBustCap = Math.Max(0, Config.GetValue("Penalties", "BustFineCap", 3000));
+
 			// Default ON: spoofing is what makes the wallet/shops work, so a fresh install is ready to go
 			// the moment the user flips the master switch (which itself defaults OFF). Safe to default on
 			// because the master gates it — nothing spoofs until the mod is enabled.
@@ -411,6 +431,10 @@ namespace FreemodeIdentity {
 			Config.SetValue("Loadout", "Health", loadoutHealth);
 			Config.SetValue("Loadout", "SavePeriodSeconds", loadoutSavePeriodMs / 1000);
 			Config.SetValue("Skills", "Enabled", skillsEnabled);
+			Config.SetValue("Penalties", "Enabled", penaltiesEnabled);
+			Config.SetValue("Penalties", "Percent", penaltyPercent);
+			Config.SetValue("Penalties", "DeathFeeCap", penaltyDeathCap);
+			Config.SetValue("Penalties", "BustFineCap", penaltyBustCap);
 			Config.SetValue("Spoof", "Enabled", spoofEnabled);
 			Config.SetValue("Spoof", "Target", spoofTarget);
 			Config.SetValue("State", "ActiveSlot", ActiveSlot);
@@ -578,6 +602,16 @@ namespace FreemodeIdentity {
 				} else {
 					WasArrested = false;
 				}
+
+				// Replay the story-mode death/arrest cash penalties the dropped spoof costs us. The falling
+				// edge (revive / arrest walk-out) is when the real game applies them, so charge here: a death
+				// healthcare fee or a bust bail fine out of the wallet. Gated on the wallet being live —
+				// fining a wallet the player isn't using is pointless.
+				if (penaltiesEnabled && WalletActive) {
+					if (revived) ApplyDeathFee();
+					if (released) ApplyBustPenalty();
+				}
+
 				revived = revived || released;
 
 				// Auto-apply is NOT a one-shot: the game can wipe the look long after load, and we
@@ -887,6 +921,29 @@ namespace FreemodeIdentity {
 			}
 		}
 
+		// === Penalties: simulated story-mode death/arrest costs ===========================
+
+		// SP charges floor(pct% of cash) clamped to a cap. floor means a low wallet pays little or
+		// nothing — and a $0 fee is a no-op, so an empty wallet is never touched. Returns the (positive)
+		// fee to debit.
+		int FeeFor(int cap) => Math.Min(cap, wallet.Balance / 100 * penaltyPercent);
+
+		void ApplyDeathFee() {
+			int fee = FeeFor(penaltyDeathCap);
+			if (fee <= 0) return;
+			wallet.Apply(-fee);
+			Logger.Log($"Penalty: death healthcare fee ${fee} -> wallet ${wallet.Balance}.");
+			Notify($"Healthcare fee ~r~-${fee}~s~");
+		}
+
+		void ApplyBustPenalty() {
+			int fee = FeeFor(penaltyBustCap);
+			if (fee <= 0) return;
+			wallet.Apply(-fee);
+			Logger.Log($"Penalty: arrest bail fine ${fee} -> wallet ${wallet.Balance}.");
+			Notify($"Bail fine ~r~-${fee}~s~");
+		}
+
 		// === Loadout: sample + restore weapons/armor/health ===============================
 
 		// True once vitals (armor/health) have been restored this session. They restore on the FIRST
@@ -940,6 +997,12 @@ namespace FreemodeIdentity {
 		//     would capture a half-dead state.
 		void SampleLoadout() {
 			if (!LoadoutActive || !AppearanceActive || EditMode || SnapshotInProgress) {
+				return;
+			}
+			// Hold off through a death/arrest recovery: the arrest walk-out clears IS_PLAYER_BEING_ARRESTED
+			// a beat before the respawn settles, so the gate below would open while the ped is still
+			// mid-recovery — a sample then would store a transient half-recovered state.
+			if (RecoveringFromRespawn) {
 				return;
 			}
 			// Wait for the stored loadout to be replayed onto the loaded ped before sampling, or the
