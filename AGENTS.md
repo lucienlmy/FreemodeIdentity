@@ -96,4 +96,4 @@ These were settled in-game; don't re-derive or second-guess them without a probe
   native hashes are version-stable and may be named constants, struct offsets are pinned
   per build and must be re-verified.
 - Don't auto-redirect without the explicit toggle (would hijack real story money).
-- No dead code, no comments that restate code — comment only WHY.
+- No dead code, no comments that restate code — comment only WHY, concise and natural.

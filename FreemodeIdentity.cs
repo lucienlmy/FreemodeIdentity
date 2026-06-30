@@ -46,14 +46,19 @@ namespace FreemodeIdentity {
 		// --- Skills (a user-set skill profile; they don't progress on their own) ----------
 		readonly Skills skills = new Skills();
 		bool skillsEnabled;
+		// Keep flushing the skill-up feed widget until this time, so the shim's restore-to-real write on
+		// unpin (itself a skill change) doesn't leave the widget stuck. Re-armed every frame while pinned.
+		int skillFlushUntilMs = -1;
+		const int SkillFlushTrailMs = 1500;
 
 		// === Menu ==========================================================================
 		// The tree: MainMenu holds the two master checkboxes + the Appearance/Wallet anchors;
 		// every other control nests under one of those two. *MenuItem fields are the anchors,
 		// held so the tick loop can grey them out.
 		NativeMenu MainMenu;
-		NativeCheckboxItem EnabledItem;       // appearance master
-		NativeCheckboxItem WalletEnabledItem; // wallet master
+		NativeCheckboxItem MasterEnabledItem; // mod master switch (first main-menu item)
+		NativeCheckboxItem EnabledItem;       // appearance toggle (in the Appearance submenu)
+		NativeCheckboxItem WalletEnabledItem; // wallet toggle (in the Wallet submenu)
 
 		NativeMenu AppearanceMenu;
 		NativeItem AppearanceMenuItem;
@@ -167,11 +172,24 @@ namespace FreemodeIdentity {
 		NativeCheckboxItem ManualMoodItem;
 		NativeCheckboxItem ManualMovingStyleItem;
 
-		// Appearance master. On applies the active freemode look (auto-apply / Enable) and
+		// Mod master switch (ini [General] Enabled, the first key). Off makes the WHOLE mod inert
+		// regardless of the per-feature toggles; on lets each feature run per its own checkbox. The
+		// per-feature intents below persist across a master off/on, so flipping the master back on
+		// restores exactly what was enabled. Behavioural gates read `masterEnabled && <feature>`.
+		bool masterEnabled;
+		// Appearance feature toggle. On applies the active freemode look (auto-apply / Enable) and
 		// remembers the story protagonist it replaced; off swaps back to that protagonist and
-		// goes passive. Distinct from the wallet master (walletEnabled) — they are separate
-		// features the user can run independently.
-		bool Enabled;
+		// goes passive. Distinct from the wallet toggle (walletEnabled) — separate features the user
+		// can run independently. Gated by the master: behaviour reads AppearanceActive, not this raw flag.
+		bool appearanceEnabled;
+
+		// Effective per-feature gates: a feature runs only when the master switch AND its own toggle are
+		// on. Behavioural code reads these; the menu checkboxes and ini persist the raw intent fields.
+		bool AppearanceActive => masterEnabled && appearanceEnabled;
+		bool WalletActive => masterEnabled && walletEnabled;
+		bool LoadoutActive => masterEnabled && loadoutEnabled;
+		bool SkillsActive => masterEnabled && skillsEnabled;
+		bool SpoofActive => masterEnabled && spoofEnabled;
 		// The real story-protagonist model captured at load (before auto-apply/spoof), so
 		// Disable can return there. "" = none captured.
 		string SourceModel;
@@ -288,7 +306,7 @@ namespace FreemodeIdentity {
 			wallet.Load();
 			loadout.Load();
 			skills.Load();
-			Logger.LogBanner($"Config: edition={GameBuild.Current} enabled={Enabled} wallet={walletEnabled} earning={earningEnabled} spoof={spoofEnabled} target={spoofTarget} menuKey={menuKey}.");
+			Logger.LogBanner($"Config: edition={GameBuild.Current} master={masterEnabled} appearance={appearanceEnabled} wallet={walletEnabled} earning={earningEnabled} spoof={spoofEnabled} target={spoofTarget} menuKey={menuKey}.");
 
 			XmlAppearanceStorage.Initialize(ScriptPaths.DataDirectory);
 			MenuInit();
@@ -300,7 +318,7 @@ namespace FreemodeIdentity {
 
 		// Read every setting once. The ini is grouped by feature, with all runtime state (not
 		// user-editable) corralled in [State]:
-		//   [General]    MenuKey, LogLevel, Build
+		//   [General]    Enabled, MenuKey, LogLevel, Build
 		//   [Appearance] Enabled, ReturnProtagonist
 		//   [ManualSave] MovingStyle, Tattoos, Mood
 		//   [Wallet]     Enabled, Earning
@@ -308,7 +326,9 @@ namespace FreemodeIdentity {
 		//   [Skills]     Enabled  (the skill values live in skills.dat, not here)
 		//   [Spoof]      Enabled, Target
 		//   [State]      ActiveSlot, SourceModel, SpoofSourceHash
+		// [General] Enabled is the master switch and deliberately the first key in the file.
 		void LoadConfig() {
+			masterEnabled = Config.GetValue("General", "Enabled", false);
 			menuKey = Config.GetValue("General", "MenuKey", Keys.Shift | Keys.X);
 			// Default to Debug for the 0.x pre-releases so every reported issue arrives with full
 			// triage detail without asking the user to re-run. No path logs per tick, so the file
@@ -325,7 +345,7 @@ namespace FreemodeIdentity {
 
 			// Read order matches the menu + the ini layout written below: Appearance (+ its ManualSave
 			// sub-options), Wallet, Loadout, Spoof, State.
-			Enabled = Config.GetValue("Appearance", "Enabled", true);
+			appearanceEnabled = Config.GetValue("Appearance", "Enabled", true);
 			ReturnProtagonist = Config.GetValue("Appearance", "ReturnProtagonist", "player_zero");
 
 			// Read light-first (MovingStyle, Tattoos, Mood) to match the menu + ini order. Tattoos and
@@ -350,7 +370,10 @@ namespace FreemodeIdentity {
 			// force skills to 0 — worse than leaving them. Only enforce once the user opts in.
 			skillsEnabled = Config.GetValue("Skills", "Enabled", false);
 
-			spoofEnabled = Config.GetValue("Spoof", "Enabled", false);
+			// Default ON: spoofing is what makes the wallet/shops work, so a fresh install is ready to go
+			// the moment the user flips the master switch (which itself defaults OFF). Safe to default on
+			// because the master gates it — nothing spoofs until the mod is enabled.
+			spoofEnabled = Config.GetValue("Spoof", "Enabled", true);
 			spoofTarget = Config.GetValue("Spoof", "Target", Identity.Franklin);
 			if (Array.IndexOf(Identity.All, spoofTarget) < 0) {
 				spoofTarget = Identity.Franklin;
@@ -362,10 +385,11 @@ namespace FreemodeIdentity {
 
 			// Write every key back so the ini always reflects the full, current layout (seeds a
 			// fresh install, and completes a just-migrated one).
+			Config.SetValue("General", "Enabled", masterEnabled);
 			Config.SetValue("General", "MenuKey", menuKey);
 			Config.SetValue("General", "LogLevel", logLevel.ToString());
 			Config.SetValue("General", "Build", buildOverride);
-			Config.SetValue("Appearance", "Enabled", Enabled);
+			Config.SetValue("Appearance", "Enabled", appearanceEnabled);
 			Config.SetValue("Appearance", "ReturnProtagonist", ReturnProtagonist);
 			Config.SetValue("ManualSave", "MovingStyle", ManualMovingStyle);
 			Config.SetValue("ManualSave", "Tattoos", ManualTattoos);
@@ -441,24 +465,32 @@ namespace FreemodeIdentity {
 				}
 
 				bool busy = SnapshotInProgress;
-				// Grey the Appearance master toggle while a switch is in flight so it can't be
-				// re-pressed mid-swap (rapid re-press thrashed SET_PLAYER_MODEL and froze the game).
+				// With the master OFF the menu stays a full CONFIG screen — enablers and settings stay
+				// editable (they only record intent; the OnTick gates read masterEnabled, so nothing runs
+				// until the mod is on). Only LIVE ACTIONS that touch the ped right now are blocked below.
+				// The Appearance enabler is the exception: it does an immediate model swap, so it's greyed
+				// while a swap is settling (its own SetEnabled also no-ops the swap while the master is off).
 				if (EnabledItem != null) EnabledItem.Enabled = !appearanceSwitching;
-				if (AppearanceMenuItem != null) AppearanceMenuItem.Enabled = Enabled;
-				if (WalletMenuItem != null) WalletMenuItem.Enabled = walletEnabled;
-				// The loadout children are inert while the master is off; grey them so it reads as a unit.
+				// Loadout children grey only on their own feature flag (within-feature behaviour), not the
+				// master — they're config the user can set up while the mod is off.
 				if (LoadoutWeaponsItem != null) LoadoutWeaponsItem.Enabled = loadoutEnabled;
 				if (LoadoutArmorItem != null) LoadoutArmorItem.Enabled = loadoutEnabled;
 				if (LoadoutHealthItem != null) LoadoutHealthItem.Enabled = loadoutEnabled;
 				if (LoadoutPeriodItem != null) LoadoutPeriodItem.Enabled = loadoutEnabled;
-				// The Skills submenu stays usable with the master off — setting a value just stores it for
-				// when you turn the feature on, so the setters aren't greyed.
-				if (SnapshotItem != null) SnapshotItem.Enabled = !busy;
+
+				// Live actions — these reach into the live ped, so block them while the mod is off (and
+				// while mid-snapshot / without a target slot, as before).
+				bool canAct = masterEnabled && !busy;
+				if (SnapshotItem != null) SnapshotItem.Enabled = canAct;
 				bool hasActiveSlot = !string.IsNullOrEmpty(ActiveSlot) && XmlAppearanceStorage.Exists(ActiveSlot);
-				if (OverwriteActiveItem != null) OverwriteActiveItem.Enabled = !busy && hasActiveSlot;
-				if (ApplyActiveItem != null) ApplyActiveItem.Enabled = !busy && hasActiveSlot;
+				if (OverwriteActiveItem != null) OverwriteActiveItem.Enabled = canAct && hasActiveSlot;
+				if (ApplyActiveItem != null) ApplyActiveItem.Enabled = canAct && hasActiveSlot;
 				if (SlotsMenuItem != null) SlotsMenuItem.Enabled = !busy;
 				if (ManualMenuItem != null) ManualMenuItem.Enabled = !busy;
+				// Edit Mode only means anything while the look is actually being defended (master AND
+				// appearance on) — it exists to PAUSE that defending. Grey it otherwise so it can't be
+				// left stuck on for an inert feature.
+				if (EditModeItem != null) EditModeItem.Enabled = AppearanceActive && !busy;
 				RefreshSubtitle();
 
 				// Deferred snapshot work, tick-driven so neither trips the >5s watchdog. Give the
@@ -485,7 +517,7 @@ namespace FreemodeIdentity {
 				// normal reengage then takes over. (A single Script can still be reloaded mid-spoof.)
 				if (!strandedRecoveryDone && player != null && player.Exists()) {
 					strandedRecoveryDone = true;
-					if (spoofEnabled && !spoof.Held && spoofSourceHash != 0) {
+					if (SpoofActive && !spoof.Held && spoofSourceHash != 0) {
 						spoof.RecoverStranded(spoofSourceHash);
 					}
 				}
@@ -497,7 +529,7 @@ namespace FreemodeIdentity {
 				// Menyoo) while disabled could never be recorded, and Disable would keep returning
 				// the stale one. While disabled, the source is re-read fresh by the apply path on
 				// the next enable. Reads spoof.Held in-memory, so a spoofed identity is never taken.
-				if (Enabled) {
+				if (AppearanceActive) {
 					RememberSourceIfProtagonist();
 				}
 
@@ -522,7 +554,7 @@ namespace FreemodeIdentity {
 				// Only polled when there's a look to defend — no point invoking the native (the one
 				// unconditional per-frame call here) for a recovery we'd never act on. Tracking is
 				// reset while off so re-enabling can't read a stale falling edge.
-				bool defendActive = Enabled && XmlAppearanceStorage.Exists(ActiveSlot);
+				bool defendActive = AppearanceActive && XmlAppearanceStorage.Exists(ActiveSlot);
 				bool isArrested = defendActive && player != null
 					&& GTA.Native.Function.Call<bool>(GTA.Native.Hash.IS_PLAYER_BEING_ARRESTED, Game.Player, false);
 				bool released = false;
@@ -542,7 +574,7 @@ namespace FreemodeIdentity {
 				// Auto-apply is NOT a one-shot: the game can wipe the look long after load, and we
 				// re-arm to restore it. The cooldown skips a just-applied swap that's still settling.
 				// Suspended in Edit Mode so external tools can change the ped without it snapping back.
-				if (Enabled && !EditMode && XmlAppearanceStorage.Exists(ActiveSlot)) {
+				if (AppearanceActive && !EditMode && XmlAppearanceStorage.Exists(ActiveSlot)) {
 					bool cooling = LastAutoApplyMs >= 0 && Game.GameTime - LastAutoApplyMs < ReapplyCooldownMs;
 					if (AutoApplyDone && player != null && !SnapshotInProgress && !cooling) {
 						// Defend the look actually worn (a slot OR an applied backup), falling back to the
@@ -648,7 +680,7 @@ namespace FreemodeIdentity {
 				// ReviveApplyPending half covers the walk-out wait after either. The normal settle-gated
 				// engage takes over once the look is back.
 				bool reviveInFlight = isDead || isArrested || ReviveApplyPending;
-				if (spoofEnabled && !EditMode && !spoof.Held && !retryCooling && !reviveInFlight && AutoSpoofReady()) {
+				if (SpoofActive && !EditMode && !spoof.Held && !retryCooling && !reviveInFlight && AutoSpoofReady()) {
 					Logger.LogDebug($"Auto-spoof gate ready (current={Identity.Current() ?? "freemode"}) — engaging {spoofTarget}.");
 					// Pass the live ped's real freemode hash so Start can self-heal a stranded poison
 					// (a protagonist hash left on the shared freemode model-info) instead of refusing
@@ -682,7 +714,7 @@ namespace FreemodeIdentity {
 
 				// Earning credits only while the wallet is on AND earning is on; it still tracks
 				// pickups otherwise so the baseline stays correct.
-				earning.Tick(walletEnabled && earningEnabled);
+				earning.Tick(WalletActive && earningEnabled);
 
 				SyncShim();
 
@@ -691,10 +723,11 @@ namespace FreemodeIdentity {
 				SampleLoadout();
 
 				// Periodic reminder that Edit Mode is still on while no menu is open (it's silent and
-				// not persisted, easy to forget). Hold off while any menu is open — they're editing —
-				// and reset then so the first reminder lands a full interval after they leave. Fires at
-				// most EditModeReminderMax times, then goes quiet: a longer session is taken as deliberate.
-				if (EditMode && !AnyMenuVisible()) {
+				// not persisted, easy to forget). Only while the look is actually being defended — with
+				// the mod or appearance off there's nothing for Edit Mode to pause, so the nag is noise.
+				// Hold off while any menu is open — they're editing — and reset then so the first reminder
+				// lands a full interval after they leave. Fires at most EditModeReminderMax times.
+				if (EditMode && AppearanceActive && !AnyMenuVisible()) {
 					if (editModeReminderMs < 0) {
 						editModeReminderMs = Game.GameTime;
 					} else if (editModeReminderCount < EditModeReminderMax
@@ -759,7 +792,7 @@ namespace FreemodeIdentity {
 			if (!shim.TryConnect()) {
 				return; // shim not installed — earning still works, spending just won't redirect
 			}
-			bool redirect = walletEnabled && spoof.Held;
+			bool redirect = WalletActive && spoof.Held;
 			int activeStat = redirect ? Identity.WalletStat(spoof.Target) : 0;
 			int activeBankStat = redirect ? Identity.WalletBankStat(spoof.Target) : 0;
 
@@ -786,7 +819,7 @@ namespace FreemodeIdentity {
 			// real stat memory each frame (the native path alone gets reverted; the gameplay code reads
 			// the real stat object). Gated on Skills-enabled AND spoofed (a genuine protagonist is never
 			// masked); push a cleared set otherwise so no stale profile lingers.
-			bool pinSkills = skillsEnabled && spoof.Held;
+			bool pinSkills = SkillsActive && spoof.Held;
 			int skillsChar = pinSkills ? Identity.CharIndex(spoof.Target) : -1;
 			shim.PushSkills(pinSkills, skills.HashesFor(skillsChar), skills.Values());
 
@@ -794,8 +827,13 @@ namespace FreemodeIdentity {
 			// stats_controller.ysc treats as a skill-up and posts a sticky THEFEED stats widget (the
 			// "Stamina + 100/100" portrait bar). It's not a HUD_COMPONENT and survives THEFEED_PAUSE, so
 			// the only lever is flushing the feed queue — and it must be continuous while pinned, since
-			// the script re-posts it. Scoped to pinned-and-spoofed so normal toasts are untouched otherwise.
+			// the script re-posts it. Scoped to pinned so normal toasts are untouched otherwise. Keep
+			// flushing for a short window AFTER unpinning too: the shim's restore-to-real write is itself
+			// a skill change that re-posts the widget, so a hard cut-off would leave it stuck on disable.
 			if (pinSkills) {
+				skillFlushUntilMs = Game.GameTime + SkillFlushTrailMs;
+			}
+			if (Game.GameTime < skillFlushUntilMs) {
 				GTA.Native.Function.Call(GTA.Native.Hash.THEFEED_FLUSH_QUEUE);
 			}
 		}
@@ -823,7 +861,7 @@ namespace FreemodeIdentity {
 		// spawns bare). Weapons always (gated by their toggle); vitals only when the caller says so (cold
 		// load / appearance-enable). No-op unless the loadout feature is on.
 		void RestoreLoadout(bool includeVitals) {
-			if (!loadoutEnabled) {
+			if (!LoadoutActive) {
 				return;
 			}
 			Ped ped = Game.Player?.Character;
@@ -845,14 +883,14 @@ namespace FreemodeIdentity {
 		//   - Appearance must be ENABLED — the loadout belongs to the identity we wear; with appearance
 		//     off the player is a genuine protagonist (or an undefended ped), whose own loadout we must
 		//     not capture into the identity's store (the "Franklin's gear overwrote mine" bug).
-		//   - the live BODY must be freemode — a second guard so a stale Enabled flag during a swap, or a
+		//   - the live BODY must be freemode — a second guard so a stale appearance flag during a swap, or a
 		//     genuine protagonist reached some other way, can't be sampled.
 		//   - the stored loadout must already have been replayed once (loadoutRestoredOnce) — see below.
 		//   - not mid-snapshot or in Edit Mode, where the ped is transient or being externally edited.
 		//   - not dying / arrested / mid-transition (checked below) — the ped is being wiped, so a sample
 		//     would capture a half-dead state.
 		void SampleLoadout() {
-			if (!loadoutEnabled || !Enabled || EditMode || SnapshotInProgress) {
+			if (!LoadoutActive || !AppearanceActive || EditMode || SnapshotInProgress) {
 				return;
 			}
 			// Wait for the stored loadout to be replayed onto the loaded ped before sampling, or the
@@ -1172,15 +1210,24 @@ namespace FreemodeIdentity {
 		// disable's return swap finishes.
 		bool appearanceSwitching;
 
-		// Appearance master toggle. Enable applies the active freemode look; Disable swaps back
+		// Appearance feature toggle. Enable applies the active freemode look; Disable swaps back
 		// to the story protagonist.
 		void SetEnabled(bool on) {
-			if (on == Enabled) return;
+			if (on == appearanceEnabled) return;
+			// With the master OFF this is pure intent: persist the flag but do NO live swap — OnTick's
+			// auto-apply (gated on AppearanceActive) applies the look once the mod is turned on.
+			if (!masterEnabled) {
+				appearanceEnabled = on;
+				Config.SetValue("Appearance", "Enabled", appearanceEnabled);
+				Config.Save();
+				if (EnabledItem != null) EnabledItem.Checked = appearanceEnabled;
+				return;
+			}
 			// A switch is still in flight. Greying the item only dims it — LemonUI still flips Checked
 			// and fires this on a press — so we must REVERT the checkbox to the real state and bail,
-			// or the box desyncs from Enabled and the mismatch drives an apply/return loop.
+			// or the box desyncs from appearanceEnabled and the mismatch drives an apply/return loop.
 			if (appearanceSwitching) {
-				if (EnabledItem != null) EnabledItem.Checked = Enabled;
+				if (EnabledItem != null) EnabledItem.Checked = appearanceEnabled;
 				return;
 			}
 
@@ -1202,13 +1249,17 @@ namespace FreemodeIdentity {
 				if (SpoofItem != null) SpoofItem.Checked = spoofEnabled;
 			}
 
-			// Don't touch Edit Mode here. Force-clearing it on disable desynced the flag from its
-			// checkbox (LemonUI won't redraw a closed submenu), so the box read on while the mod
-			// resumed defending the look. Only SetEditMode flips it now, so the two can't disagree.
-			Enabled = on;
-			Config.SetValue("Appearance", "Enabled", Enabled);
+			// Clear Edit Mode on disable: the return swap below ends the edit context, and a stale
+			// EditMode would block the auto-apply gate on the next enable. ClearEditMode syncs the
+			// checkbox too (the old desync bug was clearing the flag WITHOUT updating the box — here
+			// they stay in lockstep, so a closed-submenu redraw still reads correctly on reopen).
+			if (!on) {
+				ClearEditMode();
+			}
+			appearanceEnabled = on;
+			Config.SetValue("Appearance", "Enabled", appearanceEnabled);
 			Config.Save();
-			if (EnabledItem != null) EnabledItem.Checked = Enabled;
+			if (EnabledItem != null) EnabledItem.Checked = appearanceEnabled;
 
 			if (SnapshotInProgress) {
 				NotifyBusy();
@@ -1266,17 +1317,17 @@ namespace FreemodeIdentity {
 		// signals are concrete/honest (no per-frame head-blend native in the steady path).
 		bool SwitchFullySettled(Ped player) {
 			if (!GTA.UI.Screen.IsFadedIn) return false;
-			if (Enabled) {
+			if (AppearanceActive) {
 				if (!AutoApplyDone) return false;
 				// Spoof must have reached intent: off, or actually engaged.
-				if (spoofEnabled && !EditMode && !spoof.Held) return false;
+				if (SpoofActive && !EditMode && !spoof.Held) return false;
 				return true;
 			}
 			// Disabled: settled once we're back on a genuine protagonist body (the return swap landed).
 			return PlayerIdentity.GenuineProtagonist(player, spoof) != null;
 		}
 
-		// Wallet master toggle. Off makes the wallet inert: earning and the shop spend-redirect
+		// Wallet feature toggle. Off makes the wallet inert: earning and the shop spend-redirect
 		// both key on walletEnabled in OnTick, so flipping the flag stops them. The spoof is NOT
 		// touched — it's an independent disguise. With the wallet off the shop still opens and the
 		// purchase completes, but the charge can't stick: the shop pokes the SP cash GLOBAL, which
@@ -1302,6 +1353,12 @@ namespace FreemodeIdentity {
 		// INTENT is never touched, so it returns exactly as it was.
 		void SetEditMode(bool on) {
 			if (on == EditMode) return;
+			// Edit Mode only applies while the look is being defended; if it isn't (master or appearance
+			// off), a press on the greyed item must not flip the flag — revert and bail.
+			if (!AppearanceActive) {
+				if (EditModeItem != null) EditModeItem.Checked = EditMode;
+				return;
+			}
 			EditMode = on;
 			if (on && spoof.Held) {
 				spoof.Stop("edit mode");
@@ -1313,6 +1370,19 @@ namespace FreemodeIdentity {
 				Notify("Edit Mode off - defending your active look again.");
 			}
 			Logger.Log($"Edit Mode {(on ? "on" : "off")}.");
+		}
+
+		// Force Edit Mode off without the "defending again" notify — used when the mod stops defending
+		// (master or appearance turned off), where the edit context is ending anyway and a re-apply
+		// would otherwise be blocked by a stale EditMode on the next enable. Resets the reminder so it
+		// doesn't fire later, and syncs the checkbox. Silent: the disable path shows its own message.
+		void ClearEditMode() {
+			if (!EditMode) return;
+			EditMode = false;
+			editModeReminderMs = -1;
+			editModeReminderCount = 0;
+			if (EditModeItem != null) EditModeItem.Checked = false;
+			Logger.Log("Edit Mode cleared (mod stopped defending).");
 		}
 
 		// Swap the player back to the protagonist we replaced: captured SourceModel first, else the
@@ -1439,11 +1509,11 @@ namespace FreemodeIdentity {
 		string lastSubtitle;
 		void RefreshSubtitle() {
 			string subtitle = $"~o~{MenuVersion}~s~";
-			if (Enabled) {
+			if (AppearanceActive) {
 				string active = string.IsNullOrEmpty(ActiveSlot) ? "no active slot" : ActiveSlot;
 				subtitle += $"  ·  ~b~{active}~s~";
 			}
-			if (walletEnabled) {
+			if (WalletActive) {
 				subtitle += $"  ·  ~g~${wallet.Balance}~s~";
 			}
 			if (subtitle != lastSubtitle) {
@@ -1494,12 +1564,11 @@ namespace FreemodeIdentity {
 			spoofAvailModel = modelHash;
 
 			string genuine = PlayerIdentity.GenuineProtagonist(ped, spoof);
-			bool available = genuine == null;
-			if (SpoofMenuItem.Enabled != available) SpoofMenuItem.Enabled = available;
-			if (SpoofItem.Enabled != available) SpoofItem.Enabled = available;
-			if (TargetItem.Enabled != available) TargetItem.Enabled = available;
+			// The Spoofing controls stay EDITABLE on a genuine protagonist — they record intent and the
+			// auto-spoof gate engages once you're a freemode ped. Only the submenu DESCRIPTION reflects
+			// that it can't engage yet, so the user knows why nothing happened.
 			SpoofMenuItem.Description = genuine != null
-				? $"Unavailable as a real {genuine} - switch to a freemode character."
+				? $"As a real {genuine}, spoofing won't engage until you're a freemode character."
 				: "Disguise as a protagonist so shops open.";
 		}
 
@@ -1538,35 +1607,14 @@ namespace FreemodeIdentity {
 			MainMenu.KeepNameCasing = true;
 			Pool.Add(MainMenu);
 
-			EnabledItem = new NativeCheckboxItem("Appearance Enabled",
-				"Turn on to wear your saved look, or off to go back to your story character.",
-				Enabled);
-			EnabledItem.CheckboxChanged += (s, a) => SetEnabled(EnabledItem.Checked);
-			MainMenu.Add(EnabledItem);
-
-			WalletEnabledItem = new NativeCheckboxItem("Wallet Enabled",
-				"Turn off to stop earning from pickups and routing shop charges to your wallet.",
-				walletEnabled);
-			WalletEnabledItem.CheckboxChanged += (s, a) => SetWalletEnabled(WalletEnabledItem.Checked);
-			MainMenu.Add(WalletEnabledItem);
-
-			LoadoutEnabledItem = new NativeCheckboxItem("Loadout Enabled",
-				"Periodically saves your carried weapons, armor and health, and restores them when your look is applied.",
-				loadoutEnabled);
-			LoadoutEnabledItem.CheckboxChanged += (s, a) => SetLoadoutEnabled(LoadoutEnabledItem.Checked);
-			MainMenu.Add(LoadoutEnabledItem);
-
-			SkillsEnabledItem = new NativeCheckboxItem("Skills Enabled",
-				"Applies your chosen skill profile (strength, stamina, shooting...) when your look is applied. Set the values in Skills.",
-				skillsEnabled);
-			SkillsEnabledItem.CheckboxChanged += (s, a) => SetSkillsEnabled(SkillsEnabledItem.Checked);
-			MainMenu.Add(SkillsEnabledItem);
-
-			SpoofItem = new NativeCheckboxItem("Spoofing Enabled",
-				"~y~Required for a fully working wallet.~s~ Reads you as a protagonist so shops open, jobs pay out, and charges route to your wallet. Off = shops stay closed, and spending draws the protagonist's cash without changing their real balance.",
-				spoofEnabled);
-			SpoofItem.CheckboxChanged += (s, a) => SetSpoofEnabled(SpoofItem.Checked);
-			MainMenu.Add(SpoofItem);
+			// The mod master switch — first item, the single on/off for everything. Below it sit the
+			// feature submenus, each carrying its own Enabled toggle; the master gates them all while
+			// their individual states persist. Spoofing stays last (it's the most situational).
+			MasterEnabledItem = new NativeCheckboxItem("Enabled",
+				"Master switch. Off makes the whole mod inert. On runs each feature per its own toggle in the submenus below.",
+				masterEnabled);
+			MasterEnabledItem.CheckboxChanged += (s, a) => SetMasterEnabled(MasterEnabledItem.Checked);
+			MainMenu.Add(MasterEnabledItem);
 
 			BuildAppearanceMenu();
 			BuildWalletMenu();
@@ -1578,12 +1626,60 @@ namespace FreemodeIdentity {
 			RebuildSlotsMenu();
 		}
 
+		// Mod master toggle. Persists immediately and ACTIVELY reverts: off swaps back to the story
+		// protagonist and drops the spoof now (like turning Appearance off), so "off" means off; on
+		// re-arms the switch so OnTick's auto-apply/auto-spoof gates re-establish the look and spoof
+		// per each feature's own toggle. The per-feature intents are NOT touched — only masterEnabled
+		// is persisted — so the prior configuration is restored intact when toggled back on.
+		void SetMasterEnabled(bool on) {
+			if (on == masterEnabled) return;
+			masterEnabled = on;
+			Config.SetValue("General", "Enabled", masterEnabled);
+			Config.Save();
+			if (MasterEnabledItem != null) MasterEnabledItem.Checked = masterEnabled;
+
+			if (SnapshotInProgress || appearanceSwitching) {
+				return; // a swap is mid-flight; let it finish — the gates pick up the new master state next tick
+			}
+
+			if (!on) {
+				// Leaving Edit Mode set would block the auto-apply gate (it checks !EditMode) when the
+				// mod is turned back on, and the return swap below ends the edit context anyway — so clear
+				// it now. ClearEditMode also resets the reminder so it doesn't fire on the next enable.
+				ClearEditMode();
+				// Capture the spoof target before releasing (same reason as SetEnabled: with no captured
+				// SourceModel the impersonated identity is the only sensible character to return to), then
+				// swap back to the protagonist so the disguise and freemode look don't linger while off.
+				if (appearanceEnabled && PlayerIdentity.IsFreemodeBody(Game.Player?.Character)) {
+					string spoofedIdentity = spoof.Held ? spoof.Target : null;
+					if (spoof.Held) spoof.Stop("master disable");
+					BeginAppearanceSwitch();
+					ReturnToSourceProtagonist(spoofedIdentity);
+				} else if (spoof.Held) {
+					spoof.Stop("master disable");
+				}
+			} else {
+				// Re-arm the settle gate so the auto-apply gate re-lands this swap (a stale AutoApplyDone
+				// would otherwise skip the re-apply). The OnTick gates, now that masterEnabled is true,
+				// re-apply the active look and re-engage the spoof on their own.
+				if (appearanceEnabled && !EditMode && !string.IsNullOrEmpty(ActiveSlot)) {
+					BeginAppearanceSwitch();
+				}
+			}
+		}
+
 		void BuildAppearanceMenu() {
 			AppearanceMenu = new NativeMenu("Appearance", "Appearance");
 			AppearanceMenu.KeepNameCasing = true; // see RefreshSubtitle
 			Pool.Add(AppearanceMenu);
 			AppearanceMenuItem = MainMenu.AddSubMenu(AppearanceMenu);
 			AppearanceMenuItem.Description = "Save, apply and auto-apply your freemode look.";
+
+			EnabledItem = new NativeCheckboxItem("Appearance Enabled",
+				"Turn on to wear your saved look, or off to go back to your story character.",
+				appearanceEnabled);
+			EnabledItem.CheckboxChanged += (s, a) => SetEnabled(EnabledItem.Checked);
+			AppearanceMenu.Add(EnabledItem);
 
 			SnapshotItem = new NativeItem("Save to New Slot",
 				"Snapshot the current freemode character into a new slot.");
@@ -1624,6 +1720,12 @@ namespace FreemodeIdentity {
 			WalletMenuItem = MainMenu.AddSubMenu(WalletMenu);
 			WalletMenuItem.Description = "Earn from pickups and route shop charges here while spoofing.";
 
+			WalletEnabledItem = new NativeCheckboxItem("Wallet Enabled",
+				"Turn off to stop earning from pickups and routing shop charges to your wallet.",
+				walletEnabled);
+			WalletEnabledItem.CheckboxChanged += (s, a) => SetWalletEnabled(WalletEnabledItem.Checked);
+			WalletMenu.Add(WalletEnabledItem);
+
 			EarningItem = new NativeCheckboxItem("Pickups Enabled",
 				"Credit the wallet the real value of collected cash pickups.",
 				earningEnabled);
@@ -1635,29 +1737,28 @@ namespace FreemodeIdentity {
 			WalletMenu.Add(EarningItem);
 		}
 
-		// Spoofing master toggle (top-level checkbox). On reads the player as a protagonist so
-		// shops open; off releases the disguise. Refuses on a GENUINE protagonist (would redirect
-		// real story cash) and reverts the checkbox so we never persist an intent we can't honour.
-		// Other Start misses are transient (ped not ready) and left to the OnTick auto-retry.
+		// Spoofing feature toggle (in the Spoofing submenu). Records the INTENT to spoof; it engages
+		// only once the conditions are met (the mod's master on AND a freemode ped — engaging on a
+		// genuine protagonist would redirect real story cash). So this never refuses: on a protagonist
+		// or with the master off it just stores the intent, and OnTick's auto-spoof gate engages it the
+		// moment you're a freemode ped. Turning it off always releases any live hold immediately.
 		void SetSpoofEnabled(bool on) {
+			spoofEnabled = on;
+			Config.SetValue("Spoof", "Enabled", spoofEnabled);
+			Config.Save();
+			if (SpoofItem != null) SpoofItem.Checked = spoofEnabled;
+
 			if (on) {
-				string current = PlayerIdentity.GenuineProtagonist(Game.Player?.Character, spoof);
-				if (current != null) {
-					Warn($"Can't spoof as {current}", "- switch to a freemode character first.");
-					SpoofItem.Checked = false;
-					return;
-				}
-				spoofEnabled = true;
-				if (spoof.Start(spoofTarget)) {
-					PersistSpoofSource(spoof.OriginalHash);
+				// Engage now only if it's actually allowed; otherwise leave it to the OnTick gate.
+				if (masterEnabled && PlayerIdentity.GenuineProtagonist(Game.Player?.Character, spoof) == null) {
+					if (spoof.Start(spoofTarget)) {
+						PersistSpoofSource(spoof.OriginalHash);
+					}
 				}
 			} else {
-				spoofEnabled = false;
 				spoof.Stop("menu");
 				PersistSpoofSource(0);
 			}
-			Config.SetValue("Spoof", "Enabled", spoofEnabled);
-			Config.Save();
 		}
 
 		void BuildSpoofMenu() {
@@ -1665,6 +1766,12 @@ namespace FreemodeIdentity {
 			Pool.Add(SpoofMenu);
 			SpoofMenuItem = MainMenu.AddSubMenu(SpoofMenu);
 			SpoofMenuItem.Description = "Disguise as a protagonist so shops open.";
+
+			SpoofItem = new NativeCheckboxItem("Spoofing Enabled",
+				"~y~Required for a fully working wallet.~s~ Reads you as a protagonist so shops open, jobs pay out, and charges route to your wallet. Engages once you're a freemode character and the mod is on. Off = shops stay closed, and spending draws the protagonist's cash without changing their real balance.",
+				spoofEnabled);
+			SpoofItem.CheckboxChanged += (s, a) => SetSpoofEnabled(SpoofItem.Checked);
+			SpoofMenu.Add(SpoofItem);
 
 			TargetItem = new NativeListItem<string>("Target", Identity.All);
 			TargetItem.Description = "Which protagonist to impersonate while spoofing.";
@@ -1681,7 +1788,7 @@ namespace FreemodeIdentity {
 			SpoofMenu.Add(TargetItem);
 		}
 
-		// Loadout master toggle. Off makes the whole subsystem inert: OnTick's sampler and every
+		// Loadout feature toggle. Off makes the whole subsystem inert: OnTick's sampler and every
 		// restore key on loadoutEnabled, so flipping it stops both capture and replay. Doesn't touch
 		// the stored file — turning it back on resumes from the last snapshot.
 		void SetLoadoutEnabled(bool on) {
@@ -1696,7 +1803,13 @@ namespace FreemodeIdentity {
 			LoadoutMenu = new NativeMenu("Loadout", "Loadout");
 			Pool.Add(LoadoutMenu);
 			LoadoutMenuItem = MainMenu.AddSubMenu(LoadoutMenu);
-			LoadoutMenuItem.Description = "Choose what to keep (weapons, armor, health) and how often to save it. The master switch is on the main menu.";
+			LoadoutMenuItem.Description = "Keep your weapons, armor and health across loads and respawns.";
+
+			LoadoutEnabledItem = new NativeCheckboxItem("Loadout Enabled",
+				"Periodically saves your carried weapons, armor and health, and restores them when your look is applied.",
+				loadoutEnabled);
+			LoadoutEnabledItem.CheckboxChanged += (s, a) => SetLoadoutEnabled(LoadoutEnabledItem.Checked);
+			LoadoutMenu.Add(LoadoutEnabledItem);
 
 			LoadoutWeaponsItem = new NativeCheckboxItem("Weapons",
 				"Keep your guns, ammo, attachments and tints. Restored whenever your look is re-applied.",
@@ -1739,7 +1852,7 @@ namespace FreemodeIdentity {
 			LoadoutMenu.Add(LoadoutPeriodItem);
 		}
 
-		// Skills master toggle. Off leaves skills untouched (an unset profile is all-zeros, so applying
+		// Skills feature toggle. Off leaves skills untouched (an unset profile is all-zeros, so applying
 		// it would zero a fresh char's skills). On enforces the chosen profile on every look apply.
 		void SetSkillsEnabled(bool on) {
 			if (on == skillsEnabled) return;
@@ -1748,8 +1861,8 @@ namespace FreemodeIdentity {
 			Config.Save();
 			if (SkillsEnabledItem != null) SkillsEnabledItem.Checked = skillsEnabled;
 			// No immediate apply needed: SyncShim pushes the pin state to the shim every tick, so flipping
-			// this takes effect on the next tick. Turning off un-pins (skill reads pass through to the real
-			// protagonist values again); the game keeps whatever was last read.
+			// this takes effect on the next tick. Turning off un-pins, and the shim restores each skill's
+			// real value (the protagonist's saved profile) before it stops writing.
 		}
 
 		// 0,5,10..100 — the per-skill setter scale (steps of 5, starting at 0). Both the option values
@@ -1765,7 +1878,13 @@ namespace FreemodeIdentity {
 			SkillsMenu = new NativeMenu("Skills", "Skills");
 			Pool.Add(SkillsMenu);
 			SkillsMenuItem = MainMenu.AddSubMenu(SkillsMenu);
-			SkillsMenuItem.Description = "Set your character's skill levels. They don't level up on their own, so set them here. The master switch is on the main menu.";
+			SkillsMenuItem.Description = "Set your character's skill levels — they don't level up on their own.";
+
+			SkillsEnabledItem = new NativeCheckboxItem("Skills Enabled",
+				"Applies your chosen skill profile (strength, stamina, shooting...) while spoofed. Set the values below.",
+				skillsEnabled);
+			SkillsEnabledItem.CheckboxChanged += (s, a) => SetSkillsEnabled(SkillsEnabledItem.Checked);
+			SkillsMenu.Add(SkillsEnabledItem);
 
 			// One scrollable 0..100 setter per skill. Scrolling sets the stored value (and the live stat
 			// if we're spoofed), so a change shows in-game at once. NativeListItem<int> renders the int
@@ -1871,9 +1990,10 @@ namespace FreemodeIdentity {
 			uint baseHash = unchecked((uint)RealPlayerModelHash());
 			DbgBaseModelItem.Title = baseHash != 0 ? $"Base / real model: {DescribeModel(baseHash)}" : "Base / real model: -";
 
-			// "want" = the standing intent (spoofEnabled): which protagonist we'll auto-reengage as
-			// the moment we're back on a freemode ped — distinct from whether the hold is live now.
-			string want = spoofEnabled ? spoofTarget : "none";
+			// "want" = the standing intent: which protagonist we'll auto-reengage as the moment we're
+			// back on a freemode ped — distinct from whether the hold is live now. Reads effective
+			// (master AND spoof on), so with the mod master off it correctly shows "none".
+			string want = SpoofActive ? spoofTarget : "none";
 			DbgSpoofItem.Title = spoof.Held
 				? $"Spoof: holding {spoof.Target} (want: {want})"
 				: $"Spoof: off (want: {want})";

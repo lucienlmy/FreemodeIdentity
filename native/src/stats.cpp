@@ -37,9 +37,10 @@ constexpr Sig kEnhancedSig = { "45 31 C0 48 8D 3D ?? ?? ?? ?? 48 89", 6, 10 };
 // Resolved atArray address: { void* data; u16 count; u16 cap }. 0 until Init succeeds.
 uintptr_t g_statsArray = 0;
 
-// sStatData::SetIntData is vtable slot 2 on both editions (CustomLocalSaves gta/stat.hpp). This is
-// the most fragile constant here — if a write doesn't take, re-derive it first.
+// sStatData vtable slots on both editions (CustomLocalSaves gta/stat.hpp): SetIntData=2, GetIntData=12.
+// These are the most fragile constants here — if a write/read doesn't take, re-derive them first.
 constexpr int kSetIntVtIdx = 2;
+constexpr int kGetIntVtIdx = 12;
 
 bool Readable(const void* p, size_t n) {
 	if (!p) return false;
@@ -107,8 +108,9 @@ void* GetStatData(uint32_t hash) {
 	return nullptr;
 }
 
-// Call sStatData::SetInt(value) through the vtable. The object is `this`; vtable is at *obj.
+// Call sStatData::SetInt(value) / GetInt() through the vtable. The object is `this`; vtable is at *obj.
 using SetIntFn = void (*)(void* self, int value);
+using GetIntFn = int (*)(void* self);
 
 } // namespace
 
@@ -141,6 +143,16 @@ bool WriteInt(uint32_t hash, int value) {
 	if (!Readable(vtable, (kSetIntVtIdx + 1) * sizeof(void*))) return false;
 	auto setInt = reinterpret_cast<SetIntFn>(vtable[kSetIntVtIdx]);
 	setInt(obj, value);
+	return true;
+}
+
+bool ReadInt(uint32_t hash, int* out) {
+	void* obj = GetStatData(hash);
+	if (!obj || !Readable(obj, 0x10)) return false;
+	void** vtable = *reinterpret_cast<void***>(obj);
+	if (!Readable(vtable, (kGetIntVtIdx + 1) * sizeof(void*))) return false;
+	auto getInt = reinterpret_cast<GetIntFn>(vtable[kGetIntVtIdx]);
+	if (out) *out = getInt(obj);
 	return true;
 }
 

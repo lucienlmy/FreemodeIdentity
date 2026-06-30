@@ -19,4 +19,9 @@ bool Init();
 // resolved or the hash isn't a stat in the table. Returns true if it wrote.
 bool WriteInt(uint32_t hash, int value);
 
+// Read an int stat's value directly from memory (the object's GetInt vfunc), bypassing the
+// STAT_GET_INT native. Used to snapshot a stat's real value before we overwrite it, so the
+// original can be restored when pinning stops. Returns false if unresolved / not found; value -> *out.
+bool ReadInt(uint32_t hash, int* out);
+
 } // namespace Stats

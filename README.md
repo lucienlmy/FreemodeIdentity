@@ -17,6 +17,9 @@ It merges these jobs into one mod:
 - **Loadout** - the game saves none of a freemode character's weapons, armor or
   health, and applying your look respawns the ped bare. Freemode Identity keeps them
   for you and restores them with your look.
+- **Skills** - a freemode ped's ability skills (strength, stamina, shooting...) never
+  progress on their own. Freemode Identity lets you set a skill profile that actually
+  takes effect in gameplay while you're spoofed.
 
 It does not author looks - that's left to a full customizer (e.g.
 [Menyoo](https://www.gta5-mods.com/scripts/menyoo-pc-sp)). Freemode Identity
@@ -86,6 +89,21 @@ game just reset on a respawn would soften death. Sampling only runs on a settled
 ped, never while you're dying, busted or mid-transition, so a half-dead state is never
 stored.
 
+## Skills
+
+A freemode character's ability skills (strength, stamina, shooting, stealth, flying,
+driving, lung capacity) **never level up** - the game's skill-progression scripts only
+run for a real story protagonist, and spoofing doesn't change that. So instead of
+preserving earned progress, the Skills feature lets you **set a profile** that the game
+honours: pick a value (0-100) per skill and, while you're spoofed, your freemode
+character reads and plays with those skills instead of the protagonist's.
+
+The values can't be held through the normal stat natives (the game reverts them), so the
+native shim writes them straight into the live stat object each frame - the same place
+the gameplay code reads, so a low stamina really does limit sprinting. Turning Skills off
+restores the real values cleanly and stops touching them, so another skills mod can take
+over by simply leaving this feature off.
+
 ## Install
 
 1. Requires [ScriptHookV](http://www.dev-c.com/gtav/scripthookv/) and
@@ -102,21 +120,22 @@ stored.
 Press **Shift + X** (configurable) to open the menu. The subtitle shows the version,
 the active slot while appearance is on, and the wallet balance while the wallet is on.
 
-Top-level toggles:
+The first item is the master switch:
 
-- **Appearance Enabled** - wear your saved look. On applies the active slot on load
-  and re-applies it after death/respawn/model-swap; off swaps you back to your story
-  character.
-- **Wallet Enabled** - earn from pickups and route shop charges to the wallet while
-  spoofing. Off makes the wallet inert.
-- **Loadout Enabled** - keep your weapons, armor and health and restore them with your
-  look. Off stops saving and restoring them.
-- **Spoofing Enabled** - read as a protagonist so shops open and jobs pay out. Turn the
-  wallet on too to make money actually change.
+- **Enabled** - the single on/off for the whole mod. **Off by default**, so a fresh
+  install does nothing until you turn it on. Off makes everything inert and swaps you back
+  to your story character; on runs each feature per its own toggle. Each feature lives in
+  its own submenu below, with its **Enabled** toggle as the first item there.
+
+While the master is off the menu stays a **config screen** - you can still set every
+toggle and value (they just record your intent for when you turn it on); only the live
+actions that touch the ped right now (Save / Overwrite / Apply / Edit Mode) are greyed.
 
 Submenus:
 
 - **Appearance ▸**
+  - **Appearance Enabled** - wear your saved look. On applies the active slot on load and
+    re-applies it after death/respawn/model-swap; off swaps you back to your story character.
   - **Save to New Slot** / **Overwrite Active Slot** / **Apply Active Slot**.
   - **Saved Appearances ▸** - every slot. The active slot is flagged with a coloured `>`:
     green when it has a backup, yellow when it doesn't. Scroll a slot to pick an action,
@@ -129,14 +148,27 @@ Submenus:
     brief scan and **off by default**.
   - **Edit Mode** - pauses the re-apply and drops the spoof so an external tool (Menyoo)
     can change the ped freely. Save your look, then turn it off.
-- **Wallet ▸** - **Pickups Enabled** (credit collected cash pickups).
-- **Loadout ▸** - **Weapons**, **Armor**, **Health** (each independently preserved) and
-  **Save Period** (how often the carried state is snapshotted).
-- **Spoofing ▸** - **Target** (which protagonist to impersonate).
+- **Wallet ▸**
+  - **Wallet Enabled** - earn from pickups and route shop charges to the wallet while
+    spoofing. Off makes the wallet inert.
+  - **Pickups Enabled** - credit collected cash pickups.
+- **Loadout ▸**
+  - **Loadout Enabled** - keep your weapons, armor and health and restore them with your
+    look. Off stops saving and restoring them.
+  - **Weapons**, **Armor**, **Health** (each independently preserved) and **Save Period**
+    (how often the carried state is snapshotted).
+- **Skills ▸**
+  - **Skills Enabled** - apply your chosen skill profile while spoofed. **Off by default**
+    (an unset profile is all zeros, which would zero a fresh character).
+  - One **0-100 setter per skill** (strength, stamina, shooting, stealth, flying, driving,
+    lung capacity), in steps of 5. Values save immediately and take effect once spoofed.
+- **Spoofing ▸**
+  - **Spoofing Enabled** - read as a protagonist so shops open and jobs pay out. **On by
+    default**, so flipping the master on is enough to get the wallet working. It records
+    intent and engages once you're a freemode character and the mod is on - so it's safe to
+    leave on even while you're a story protagonist (it just won't engage until you're not).
+  - **Target** - which protagonist to impersonate.
 - **Debug ▸** - log level, live identity read-outs, and a force-model escape hatch.
-
-When you're a real story protagonist, spoofing is unavailable (it would hijack real
-story money) - switch to a freemode ped first.
 
 ## Files
 
@@ -150,6 +182,7 @@ under the game tree at launch; this location stays writable on both editions):
 - `wallet.dat` - the wallet balance
 - `loadout.dat` - your preserved weapons, armor and health (each line carries a
   readable comment naming the weapon and its attachments)
+- `skills.dat` - your chosen skill profile (one `NAME value` line per skill)
 
 ## Config (`FreemodeIdentity.ini`)
 
@@ -159,6 +192,7 @@ runtime state isolated in `[State]`. The full layout, with the values each key a
 
 ```ini
 [General]
+Enabled = False           ; True | False  - the mod master switch (the whole mod is off until on)
 MenuKey = Shift, X        ; any key + optional Shift/Control/Alt, e.g. F9  or  Control, M
 LogLevel = Debug          ; Info | Debug | Error
 Build = Auto              ; Auto | Enhanced | Legacy   (Auto detects from the running exe)
@@ -183,8 +217,12 @@ Armor = True              ; True | False  - preserve body armor
 Health = True             ; True | False  - preserve health
 SavePeriodSeconds = 2     ; 1 | 2 | 5 | 10 | 30 | 60  - how often the loadout is snapshotted
 
+[Skills]
+Enabled = False           ; True | False  - apply the skill profile while spoofed
+                          ; (the skill values live in skills.dat, set via the menu)
+
 [Spoof]
-Enabled = False           ; True | False  - read as a protagonist so shops open
+Enabled = True            ; True | False  - read as a protagonist so shops open
 Target = Franklin         ; Michael | Franklin | Trevor
 
 [State]

@@ -298,17 +298,54 @@ bool Install() {
 	return ok;
 }
 
+// What we were pinning last frame, with each stat's ORIGINAL value captured the moment we first
+// overwrote it. A vfunc write HOLDS (the manager doesn't revert it), so when pinning stops we must
+// actively write the real value back — otherwise a disabled Skills leaves the stat stuck at our
+// number (and the game keeps re-posting the "skill +" widget because it still differs from the saved
+// profile). hash 0 = an empty slot. Keyed by hash so a target/profile change restores the old set.
+struct PinnedOriginal { int hash; int original; };
+PinnedOriginal g_pinnedLast[SHIM_SKILL_COUNT] = {};
+
+// True if `hash` is in the currently-requested pinned set (non-zero entries of skillHashes).
+bool IsCurrentlyPinned(int hash) {
+	if (g_state.skillsPinned == 0 || hash == 0)
+		return false;
+	for (int i = 0; i < SHIM_SKILL_COUNT; ++i)
+		if (g_state.skillHashes[i] == hash)
+			return true;
+	return false;
+}
+
 void TickPinnedSkills() {
+	// Restore any stat we pinned last frame that is no longer pinned (Skills disabled, spoof dropped,
+	// or the target changed) by writing its captured original back, so the real value returns and the
+	// game stops flagging a skill change. Done BEFORE applying this frame's pins.
+	for (int i = 0; i < SHIM_SKILL_COUNT; ++i) {
+		int hash = g_pinnedLast[i].hash;
+		if (hash != 0 && !IsCurrentlyPinned(hash)) {
+			Stats::WriteInt(static_cast<uint32_t>(hash), g_pinnedLast[i].original);
+			g_pinnedLast[i] = { 0, 0 };
+		}
+	}
+
 	if (g_state.skillsPinned == 0)
 		return;
+
 	for (int i = 0; i < SHIM_SKILL_COUNT; ++i) {
 		int hash = g_state.skillHashes[i];
 		if (hash == 0)
 			continue;
+		// Capture the real value the first frame we pin this hash (the slot is empty or holds a
+		// different hash), so it can be restored when pinning stops. Skip the capture if the read
+		// fails — better to leave it unrestorable than to save a bogus original.
+		if (g_pinnedLast[i].hash != hash) {
+			int original = 0;
+			if (Stats::ReadInt(static_cast<uint32_t>(hash), &original))
+				g_pinnedLast[i] = { hash, original };
+		}
 		// Re-assert every frame: the game's gameplay code reads the live stat object directly (sprint
 		// exhaustion etc.) and may never poll STAT_GET_INT, so the value must be kept written in memory.
-		// The write holds once set (the manager doesn't revert a vfunc write), so this is a cheap no-op
-		// after the first frame; the cost is the WriteInt itself, with the table lookup cached.
+		// The write holds once set, so this is a cheap no-op after the first frame.
 		Stats::WriteInt(static_cast<uint32_t>(hash), g_state.skillValues[i]);
 	}
 }
