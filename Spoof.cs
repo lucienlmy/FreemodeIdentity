@@ -176,8 +176,8 @@ namespace FreemodeIdentity {
 
 			// Lever 2: the active-character index global. Best-effort — hold the hash even if
 			// this one can't be written. Skipped entirely when the build has no such global
-			// (Legacy: CharIndexGlobal == -1) — the hash spoof alone still opens shops; only the
-			// pause-menu name stays freemode while spoofed.
+			// (CharIndexGlobal < 0). The gun shop keys weapon ownership on this index, so the write
+			// is what lets Ammu-Nation see weapons you own as owned across a spoof.
 			heldIndexAddr = CharIndexGlobal >= 0 ? GetGlobalPtr(CharIndexGlobal) : IntPtr.Zero;
 			if (heldIndexAddr != IntPtr.Zero && MemScan.IsReadable(heldIndexAddr, 4)) {
 				originalIndex = MemScan.ReadInt32(heldIndexAddr);
@@ -189,7 +189,10 @@ namespace FreemodeIdentity {
 
 			Held = true;
 			Target = identity;
-			Logger.Log($"Spoof: engaged as {identity} (hash {spoofHash:X8}, charIdx {charIdx}).");
+			// Logs the pre-spoof index read so a mis-resolved global (a renumbered Legacy build) shows
+			// as an out-of-range value instead of silently writing to the wrong address.
+			string indexNote = heldIndexAddr != IntPtr.Zero ? $", index {originalIndex}->{spoofIndex}" : ", index lever off";
+			Logger.Log($"Spoof: engaged as {identity} (hash {spoofHash:X8}, charIdx {charIdx}{indexNote}).");
 			return true;
 		}
 
