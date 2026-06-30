@@ -172,6 +172,7 @@ namespace FreemodeIdentity {
 			spoofHash = targetHash;
 			heldHashAddr = hashAddr;
 			heldPedHandle = ped.Handle;
+			validatedPedHandle = -1; // force Tick's slow-path validation on the first held frame
 
 			// Lever 2: the active-character index global. Best-effort — hold the hash even if
 			// this one can't be written. Skipped entirely when the build has no such global
@@ -197,42 +198,65 @@ namespace FreemodeIdentity {
 			Restore(why);
 		}
 
+		// The ped handle we last fully validated, so the steady-state path can skip the expensive
+		// re-resolution. -1 = nothing validated yet (force the slow path next tick).
+		int validatedPedHandle = -1;
+
 		// Re-assert each tick so a game rewrite can't silently drop the spoof, and so we
 		// auto-release if the held ped/archetype changed under us (model swap, respawn).
+		//
+		// Steady state (held, same ped, every frame) is the hot path — the old code re-resolved the
+		// ped address and ran two VirtualQuery syscalls EVERY frame just to re-verify an unchanging
+		// state, measured at ~1.25ms/frame. But the held addresses only move when the ped is replaced
+		// or its model swaps, and BOTH change the player ped HANDLE. So: validate fully only when the
+		// handle changes; otherwise the cached heldHashAddr/heldIndexAddr are still valid and we just
+		// re-write the value (a couple of cheap memory ops, no natives, no VirtualQuery).
 		public void Tick() {
 			if (!Held) return;
 			try {
-				Ped ped = Game.Player.Character;
-				if (ped == null || !ped.Exists() || ped.MemoryAddress == IntPtr.Zero) {
+				int handle = Game.Player.Character?.Handle ?? 0;
+				if (handle == 0) {
 					Restore("ped gone");
 					return;
 				}
-				// The player ped was replaced under us (a story character switch / respawn / our own
-				// re-apply gives a new handle). Release via Restore: heldHashAddr is the SHARED
-				// freemode model-info slot we poisoned, so restoring writes the freemode hash back
-				// THERE — it never touches the new ped's own archetype, and the spoofHash guard in
-				// Restore skips the write if a genuinely different model already sits at that slot.
-				// Skipping the restore here was the re-apply loop: our SET_PLAYER_MODEL reloads the
-				// same freemode model whose shared archetype stayed poisoned, so Model.Hash kept
-				// reading the protagonist hash and the clobber check re-fired forever.
-				if (ped.Handle != heldPedHandle) {
+				if (handle != heldPedHandle) {
+					// The player ped was replaced under us (a story character switch / respawn / our own
+					// re-apply gives a new handle). Release via Restore: heldHashAddr is the SHARED
+					// freemode model-info slot we poisoned, so restoring writes the freemode hash back
+					// THERE — it never touches the new ped's own archetype, and the spoofHash guard in
+					// Restore skips the write if a genuinely different model already sits at that slot.
 					Restore("ped replaced under hold");
 					return;
 				}
-				IntPtr archetype = MemScan.SafeReadPtr(ped.MemoryAddress + ArchetypeOffset);
-				if (archetype + HashOffset != heldHashAddr) {
-					// The archetype slot moved (model swap). Same reasoning: Restore targets the old
-					// poisoned slot and is gated on it still holding our spoof value.
-					Restore("archetype changed under hold");
-					return;
+
+				// Slow path: only when the handle first appears or changed. Re-resolve the archetype and
+				// confirm it still points at the slot we poisoned; bail if the model swapped under the
+				// same handle (rare). On success cache the handle so subsequent frames fast-path.
+				if (handle != validatedPedHandle) {
+					Ped ped = Game.Player.Character;
+					IntPtr addr = ped != null ? ped.MemoryAddress : IntPtr.Zero;
+					if (addr == IntPtr.Zero) {
+						Restore("ped gone");
+						return;
+					}
+					IntPtr archetype = MemScan.SafeReadPtr(addr + ArchetypeOffset);
+					if (archetype + HashOffset != heldHashAddr) {
+						// The archetype slot moved (model swap). Restore targets the old poisoned slot and
+						// is gated on it still holding our spoof value.
+						Restore("archetype changed under hold");
+						return;
+					}
+					validatedPedHandle = handle;
 				}
+
+				// Hot path: addresses validated and the handle hasn't changed, so just keep the spoof
+				// value asserted with guarded writes — no natives, no VirtualQuery. heldHashAddr was
+				// proven readable at engage and can't have moved without a handle change.
 				if (MemScan.ReadUInt32(heldHashAddr) != spoofHash) {
 					MemScan.WriteUInt32(heldHashAddr, spoofHash);
 				}
-				if (heldIndexAddr != IntPtr.Zero && MemScan.IsReadable(heldIndexAddr, 4)) {
-					if (MemScan.ReadInt32(heldIndexAddr) != spoofIndex) {
-						MemScan.WriteUInt32(heldIndexAddr, unchecked((uint)spoofIndex));
-					}
+				if (heldIndexAddr != IntPtr.Zero && MemScan.ReadInt32(heldIndexAddr) != spoofIndex) {
+					MemScan.WriteUInt32(heldIndexAddr, unchecked((uint)spoofIndex));
 				}
 			} catch (Exception ex) {
 				Logger.LogError($"Spoof: Tick exception {ex.GetType().Name}: {ex.Message}");
@@ -259,6 +283,7 @@ namespace FreemodeIdentity {
 			Target = null;
 			heldHashAddr = IntPtr.Zero;
 			heldIndexAddr = IntPtr.Zero;
+			validatedPedHandle = -1;
 		}
 	}
 }

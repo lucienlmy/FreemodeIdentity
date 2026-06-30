@@ -66,28 +66,38 @@ uint32_t ArrayCount() { return *reinterpret_cast<uint16_t*>(g_statsArray + 8); }
 // run every frame for every pinned skill; but a stat's sStatData object is allocated once and never
 // moves, so the first lookup's result stays valid for the session. Small fixed cache (only a handful
 // of skills are ever pinned) — no eviction needed.
-struct CacheEntry { uint32_t hash; void* obj; };
+//
+// CRITICAL: we cache MISSES too (obj == nullptr). A pinned hash that isn't in the table would
+// otherwise walk all ~40k entries EVERY FRAME and fall through uncached — measured at ~2.7ms/frame,
+// the mod's single biggest FPS cost. `present` distinguishes a cached miss from an empty slot.
+struct CacheEntry { uint32_t hash; void* obj; bool present; };
 constexpr int kCacheSize = 16;
 CacheEntry g_cache[kCacheSize] = {};
 int g_cacheCount = 0;
 
-void* CacheGet(uint32_t hash) {
-	for (int i = 0; i < g_cacheCount; ++i)
-		if (g_cache[i].hash == hash) return g_cache[i].obj;
-	return nullptr;
+// Returns true if `hash` is cached (resolved OR a known miss); the object (possibly nullptr) -> *obj.
+bool CacheGet(uint32_t hash, void** obj) {
+	for (int i = 0; i < g_cacheCount; ++i) {
+		if (g_cache[i].present && g_cache[i].hash == hash) {
+			*obj = g_cache[i].obj;
+			return true;
+		}
+	}
+	return false;
 }
 
 void CachePut(uint32_t hash, void* obj) {
 	if (g_cacheCount < kCacheSize)
-		g_cache[g_cacheCount++] = { hash, obj };
+		g_cache[g_cacheCount++] = { hash, obj, true };
 }
 
-// Find a stat's sStatData* by hash. Cached after the first hit (the object is stable for the
-// session); otherwise a linear walk of the 0x10-stride entries (hash@0x00, pointer@0x08 on both
-// editions). nullptr if unresolved / not found / memory unreadable.
+// Find a stat's sStatData* by hash. Resolved once then cached for the session (the object is stable);
+// a MISS is cached too so an absent hash never re-walks. Otherwise a linear walk of the 0x10-stride
+// entries (hash@0x00, pointer@0x08 on both editions). nullptr if not found / array unresolved.
 void* GetStatData(uint32_t hash) {
 	if (!g_statsArray) return nullptr;
-	if (void* hit = CacheGet(hash)) return hit;
+	void* cached = nullptr;
+	if (CacheGet(hash, &cached)) return cached;
 	if (!Readable(reinterpret_cast<void*>(g_statsArray), 0x10)) return nullptr;
 	auto* base = reinterpret_cast<uint8_t*>(ArrayData());
 	uint32_t count = ArrayCount();
@@ -105,6 +115,7 @@ void* GetStatData(uint32_t hash) {
 			return obj;
 		}
 	}
+	CachePut(hash, nullptr); // cache the miss so this hash never walks the table again
 	return nullptr;
 }
 

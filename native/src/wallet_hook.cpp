@@ -330,6 +330,15 @@ void TickPinnedSkills() {
 	if (g_state.skillsPinned == 0)
 		return;
 
+	// Throttle the re-assert: the memory write HOLDS once set (the manager doesn't revert it), so
+	// rewriting every frame is wasted work. ~10 Hz is far faster than any gameplay read cares about
+	// and keeps the cost negligible. (The restore block above is NOT throttled — unpin must be prompt.)
+	static ULONGLONG lastAssert = 0;
+	ULONGLONG nowMs = GetTickCount64();
+	if (nowMs - lastAssert < 100)
+		return;
+	lastAssert = nowMs;
+
 	for (int i = 0; i < SHIM_SKILL_COUNT; ++i) {
 		int hash = g_state.skillHashes[i];
 		if (hash == 0)

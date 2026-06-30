@@ -33,26 +33,40 @@ namespace FreemodeIdentity {
 			0xA3435C38, // PICKUP_MONEY_PAPER_TRAIL
 		};
 
-		// What we knew last tick about a tracked money pickup: its value, and whether we
-		// already credited it (so collection + disappearance on different frames can't
+		// What we knew last sample about a tracked money pickup: its value, and whether we
+		// already credited it (so collection + disappearance on different samples can't
 		// double-count).
 		struct Tracked {
 			public int Value;
 			public bool Credited;
 		}
+		// Double-buffered and swapped each sample so the steady state allocates nothing — the
+		// per-frame `new Dictionary` was needless GC churn in pickup-heavy scenes.
 		Dictionary<int, Tracked> tracked = new Dictionary<int, Tracked>();
+		Dictionary<int, Tracked> scratch = new Dictionary<int, Tracked>();
 
-		// Read a money pickup object's value from its struct. False if the object has no
-		// readable struct or isn't a money-pickup type. `obj` is the world pickup object
-		// (a Prop); its MemoryAddress is the same struct base the +0x468/+0x480 offsets
-		// were measured against.
+		// Scanning the whole pickup pool (a VirtualQuery per pickup) every frame was the mod's
+		// heaviest cost in busy interiors — a gun shop or police fight floods the pool, so the
+		// cost climbed with the scene and tanked FPS. Money pickups are walk-into-collect and sit
+		// on the ground until touched, so a few samples per second catches every one well before
+		// it's collected; 60 Hz bought nothing. ~6 Hz cuts the work ~10x with no functional loss.
+		const int SamplePeriodMs = 160;
+		int lastSampleMs = -1;
+
+		// Read a money pickup object's value from its struct. False if the object has no readable
+		// struct or isn't a money-pickup type. `obj` is the world pickup object (a Prop); its
+		// MemoryAddress is the same struct base the +0x468/+0x480 offsets were measured against.
+		// One readability check covers both fields (they're 0x18 apart in the one struct), and the
+		// cheap type test runs before the value read so non-money pickups bail with no extra work.
 		bool ReadMoneyPickup(Prop obj, out int value) {
 			value = 0;
 			if (obj == null) {
 				return false;
 			}
 			IntPtr addr = obj.MemoryAddress;
-			if (addr == IntPtr.Zero || !MemScan.IsReadable(addr + OffPickupValue, 4)) {
+			// Span from the type field through the end of the value field — a single VirtualQuery
+			// gating both reads instead of one per field.
+			if (addr == IntPtr.Zero || !MemScan.IsReadable(addr + OffPickupType, OffPickupValue - OffPickupType + 4)) {
 				return false;
 			}
 			uint type = MemScan.ReadUInt32(addr + OffPickupType);
@@ -63,11 +77,18 @@ namespace FreemodeIdentity {
 			return value > 0;
 		}
 
-		// Called each tick. `enabled` gates crediting (the master wallet toggle); we still
-		// track pickups when disabled so the baseline is correct when it's re-enabled.
+		// Throttled to SamplePeriodMs. `enabled` gates crediting (the master wallet toggle); we
+		// still track pickups when disabled so the baseline is correct when it's re-enabled.
 		public void Tick(bool enabled) {
+			int nowMs = Game.GameTime;
+			if (lastSampleMs >= 0 && nowMs - lastSampleMs < SamplePeriodMs) {
+				return;
+			}
+			lastSampleMs = nowMs;
+
 			Prop[] pickups = World.GetAllPickupObjects();
-			var now = new Dictionary<int, Tracked>(tracked.Count + 4);
+			Dictionary<int, Tracked> now = scratch;
+			now.Clear();
 
 			foreach (Prop p in pickups) {
 				if (!ReadMoneyPickup(p, out int value)) {
@@ -77,9 +98,8 @@ namespace FreemodeIdentity {
 				now[p.Handle] = new Tracked { Value = value, Credited = credited };
 			}
 
-			// A money pickup tracked last tick is gone now = collected (tiny street cash
-			// vanishes on contact within a frame, too fast for a collected-flag check). Credit
-			// its cached value once.
+			// A money pickup tracked last sample is gone now = collected (tiny street cash
+			// vanishes on contact, too fast for a collected-flag check). Credit its cached value once.
 			foreach (KeyValuePair<int, Tracked> kv in tracked) {
 				if (kv.Value.Credited) continue;
 				if (!now.ContainsKey(kv.Key)) {
@@ -90,6 +110,9 @@ namespace FreemodeIdentity {
 				}
 			}
 
+			// Swap buffers: this sample's map becomes the baseline; the old baseline is reused as
+			// next sample's scratch (cleared above before refilling).
+			scratch = tracked;
 			tracked = now;
 		}
 	}
