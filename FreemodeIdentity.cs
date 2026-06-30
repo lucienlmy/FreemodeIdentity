@@ -999,6 +999,13 @@ namespace FreemodeIdentity {
 			if (!LoadoutActive || !AppearanceActive || EditMode || SnapshotInProgress) {
 				return;
 			}
+			// Don't sample while an appearance/master switch is in flight: the disable leg swaps through the
+			// genuine protagonist and then a freshly-recreated bare freemode ped, and a sample landing in
+			// that window captures an empty inventory and wipes the store — the intermittent "lost the
+			// pistol after disable/enable" bug. Sampling resumes once the switch settles (a real snapshot).
+			if (appearanceSwitching) {
+				return;
+			}
 			// Hold off through a death/arrest recovery: the arrest walk-out clears IS_PLAYER_BEING_ARRESTED
 			// a beat before the respawn settles, so the gate below would open while the ped is still
 			// mid-recovery — a sample then would store a transient half-recovered state.
