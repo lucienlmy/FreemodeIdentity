@@ -7,13 +7,16 @@ look you authored and gives that look a spendable wallet so shops and money work
 Runs on **both GTA V Enhanced and Legacy** from one build - it detects the edition at
 startup and adapts (override with `[General] Build` if needed).
 
-It merges two jobs into one mod:
+It merges these jobs into one mod:
 
 - **Appearance** - snapshot your freemode ped's look into named slots and re-apply
   it automatically every session, so your character always comes up as you left them.
 - **Wallet** - a freemode ped earns nothing and can't shop (the game resolves money
   from the *protagonist* model). Freemode Identity disguises the ped as a story
   protagonist so shops open, and routes the money to a wallet of its own.
+- **Loadout** - the game saves none of a freemode character's weapons, armor or
+  health, and applying your look respawns the ped bare. Freemode Identity keeps them
+  for you and restores them with your look.
 
 It does not author looks - that's left to a full customizer (e.g.
 [Menyoo](https://www.gta5-mods.com/scripts/menyoo-pc-sp)). Freemode Identity
@@ -68,6 +71,21 @@ pay into and charge it correctly. Tested with
 [Vehicle Market](https://www.gta5-mods.com/scripts/vehicle-market) - job payouts and
 vehicle purchases land on the wallet while spoofed.
 
+## Loadout preservation
+
+A freemode character isn't a real save subject, so an in-game save keeps none of its
+**weapons, armor or health** - and re-applying your look does a model swap that respawns
+the ped empty. The Loadout feature closes that gap: it periodically snapshots what you're
+carrying to `loadout.dat` and replays it onto the freshly-applied ped.
+
+Weapons keep their **ammo, tint and attachments** (scopes, suppressors, grips, extended
+mags, and liveries with their camo colour). Each is an independent toggle, with a
+configurable save period. Weapons come back on every re-apply; **armor and health restore
+on load and when you enable your look, but not after a normal death** - re-filling what the
+game just reset on a respawn would soften death. Sampling only runs on a settled freemode
+ped, never while you're dying, busted or mid-transition, so a half-dead state is never
+stored.
+
 ## Install
 
 1. Requires [ScriptHookV](http://www.dev-c.com/gtav/scripthookv/) and
@@ -84,13 +102,15 @@ vehicle purchases land on the wallet while spoofed.
 Press **Shift + X** (configurable) to open the menu. The subtitle shows the version,
 the active slot while appearance is on, and the wallet balance while the wallet is on.
 
-Three top-level toggles:
+Top-level toggles:
 
 - **Appearance Enabled** - wear your saved look. On applies the active slot on load
   and re-applies it after death/respawn/model-swap; off swaps you back to your story
   character.
 - **Wallet Enabled** - earn from pickups and route shop charges to the wallet while
   spoofing. Off makes the wallet inert.
+- **Loadout Enabled** - keep your weapons, armor and health and restore them with your
+  look. Off stops saving and restoring them.
 - **Spoofing Enabled** - read as a protagonist so shops open and jobs pay out. Turn the
   wallet on too to make money actually change.
 
@@ -110,6 +130,8 @@ Submenus:
   - **Edit Mode** - pauses the re-apply and drops the spoof so an external tool (Menyoo)
     can change the ped freely. Save your look, then turn it off.
 - **Wallet ▸** - **Pickups Enabled** (credit collected cash pickups).
+- **Loadout ▸** - **Weapons**, **Armor**, **Health** (each independently preserved) and
+  **Save Period** (how often the carried state is snapshotted).
 - **Spoofing ▸** - **Target** (which protagonist to impersonate).
 - **Debug ▸** - log level, live identity read-outs, and a force-model escape hatch.
 
@@ -126,6 +148,8 @@ under the game tree at launch; this location stays writable on both editions):
 - `FreemodeIdentity.ini` - config
 - `FreemodeIdentity.log` / `FreemodeIdentity.shim.log` - diagnostics
 - `wallet.dat` - the wallet balance
+- `loadout.dat` - your preserved weapons, armor and health (each line carries a
+  readable comment naming the weapon and its attachments)
 
 ## Config (`FreemodeIdentity.ini`)
 
@@ -143,18 +167,25 @@ Build = Auto              ; Auto | Enhanced | Legacy   (Auto detects from the ru
 Enabled = True            ; True | False  - wear and defend the active look on load
 ReturnProtagonist = player_zero  ; player_zero (Michael) | player_one (Franklin) | player_two (Trevor)
 
-[Wallet]
-Enabled = True            ; True | False  - route shop charges to the wallet while spoofing
-Earning = True            ; True | False  - credit collected cash pickups
-
-[Spoof]
-Enabled = False           ; True | False  - read as a protagonist so shops open
-Target = Franklin         ; Michael | Franklin | Trevor
-
 [ManualSave]
 MovingStyle = True        ; True | False  - capture walk clipset on Save (light read)
 Tattoos = True            ; True | False  - capture tattoos/decals on Save (light read)
 Mood = False              ; True | False  - capture facial mood on Save (brief memory scan)
+
+[Wallet]
+Enabled = True            ; True | False  - route shop charges to the wallet while spoofing
+Earning = True            ; True | False  - credit collected cash pickups
+
+[Loadout]
+Enabled = True            ; True | False  - keep and restore weapons, armor and health
+Weapons = True            ; True | False  - preserve guns, ammo, tints and attachments
+Armor = True              ; True | False  - preserve body armor
+Health = True             ; True | False  - preserve health
+SavePeriodSeconds = 2     ; 1 | 2 | 5 | 10 | 30 | 60  - how often the loadout is snapshotted
+
+[Spoof]
+Enabled = False           ; True | False  - read as a protagonist so shops open
+Target = Franklin         ; Michael | Franklin | Trevor
 
 [State]
 ; Runtime state the mod manages - don't edit by hand.

@@ -40,6 +40,9 @@ namespace FreemodeIdentity {
 		readonly Earning earning;
 		readonly ShimBridge shim = new ShimBridge();
 
+		// --- Loadout (weapons/armor/health a freemode ped loses) --------------------------
+		readonly Loadout loadout = new Loadout();
+
 		// === Menu ==========================================================================
 		// The tree: MainMenu holds the two master checkboxes + the Appearance/Wallet anchors;
 		// every other control nests under one of those two. *MenuItem fields are the anchors,
@@ -64,6 +67,14 @@ namespace FreemodeIdentity {
 		NativeItem SpoofMenuItem;
 		NativeCheckboxItem SpoofItem;
 		NativeListItem<string> TargetItem;
+
+		NativeMenu LoadoutMenu;              // Loadout ▸ — weapons/armor/health a freemode ped loses
+		NativeItem LoadoutMenuItem;
+		NativeCheckboxItem LoadoutEnabledItem;
+		NativeCheckboxItem LoadoutWeaponsItem;
+		NativeCheckboxItem LoadoutArmorItem;
+		NativeCheckboxItem LoadoutHealthItem;
+		NativeListItem<string> LoadoutPeriodItem;
 
 		NativeMenu DebugMenu;                 // Debug ▸ — log level + live identity read-outs
 		NativeListItem<string> LogLevelItem;
@@ -235,6 +246,23 @@ namespace FreemodeIdentity {
 
 		bool redirectLogged; // last-logged redirect state, to edge-trigger the transition log
 
+		// --- Loadout config ---------------------------------------------------------------
+		// Master + per-item toggles for the weapons/armor/health a freemode ped loses (the game
+		// doesn't save them, and our model-swap recreates the ped bare). Master off = no sampling,
+		// no restore. loadoutSavePeriodMs is the shared sampling interval; the menu offers presets.
+		bool loadoutEnabled;
+		bool loadoutWeapons;
+		bool loadoutArmor;
+		bool loadoutHealth;
+		int loadoutSavePeriodMs;
+		// Game-time ms of the last loadout sample, so OnTick samples on the period rather than every
+		// frame. -1 = never sampled.
+		int lastLoadoutSampleMs = -1;
+		// The selectable sampling periods (ms), shown as the labels below. One shared timer covers
+		// every loadout group.
+		static readonly int[] LoadoutPeriodsMs = { 1000, 2000, 5000, 10000, 30000, 60000 };
+		static readonly string[] LoadoutPeriodLabels = { "1s", "2s", "5s", "10s", "30s", "60s" };
+
 		public FreemodeIdentity() {
 			// Records the DLL folder for diagnostics; runtime writes go to %APPDATA%.
 			ScriptPaths.Init(BaseDirectory);
@@ -249,6 +277,7 @@ namespace FreemodeIdentity {
 
 			earning = new Earning(wallet);
 			wallet.Load();
+			loadout.Load();
 			Logger.LogBanner($"Config: edition={GameBuild.Current} enabled={Enabled} wallet={walletEnabled} earning={earningEnabled} spoof={spoofEnabled} target={spoofTarget} menuKey={menuKey}.");
 
 			XmlAppearanceStorage.Initialize(ScriptPaths.DataDirectory);
@@ -261,11 +290,12 @@ namespace FreemodeIdentity {
 
 		// Read every setting once. The ini is grouped by feature, with all runtime state (not
 		// user-editable) corralled in [State]:
-		//   [General]    MenuKey, LogLevel
+		//   [General]    MenuKey, LogLevel, Build
 		//   [Appearance] Enabled, ReturnProtagonist
+		//   [ManualSave] MovingStyle, Tattoos, Mood
 		//   [Wallet]     Enabled, Earning
+		//   [Loadout]    Enabled, Weapons, Armor, Health, SavePeriodSeconds
 		//   [Spoof]      Enabled, Target
-		//   [ManualSave] Tattoos, Mood, MovingStyle
 		//   [State]      ActiveSlot, SourceModel, SpoofSourceHash
 		void LoadConfig() {
 			menuKey = Config.GetValue("General", "MenuKey", Keys.Shift | Keys.X);
@@ -282,23 +312,34 @@ namespace FreemodeIdentity {
 			buildOverride = Config.GetValue("General", "Build", "Auto");
 			GameBuild.Configure(buildOverride);
 
+			// Read order matches the menu + the ini layout written below: Appearance (+ its ManualSave
+			// sub-options), Wallet, Loadout, Spoof, State.
 			Enabled = Config.GetValue("Appearance", "Enabled", true);
 			ReturnProtagonist = Config.GetValue("Appearance", "ReturnProtagonist", "player_zero");
-
-			walletEnabled = Config.GetValue("Wallet", "Enabled", true);
-			earningEnabled = Config.GetValue("Wallet", "Earning", true);
-
-			spoofEnabled = Config.GetValue("Spoof", "Enabled", false);
-			spoofTarget = Config.GetValue("Spoof", "Target", Identity.Franklin);
-			if (Array.IndexOf(Identity.All, spoofTarget) < 0) {
-				spoofTarget = Identity.Franklin;
-			}
 
 			// Read light-first (MovingStyle, Tattoos, Mood) to match the menu + ini order. Tattoos and
 			// Moving Style default ON (both a quick read); Mood defaults off (a brief memory scan).
 			ManualMovingStyle = Config.GetValue("ManualSave", "MovingStyle", true);
 			ManualTattoos = Config.GetValue("ManualSave", "Tattoos", true);
 			ManualMood = Config.GetValue("ManualSave", "Mood", false);
+
+			walletEnabled = Config.GetValue("Wallet", "Enabled", true);
+			earningEnabled = Config.GetValue("Wallet", "Earning", true);
+
+			loadoutEnabled = Config.GetValue("Loadout", "Enabled", true);
+			loadoutWeapons = Config.GetValue("Loadout", "Weapons", true);
+			loadoutArmor = Config.GetValue("Loadout", "Armor", true);
+			loadoutHealth = Config.GetValue("Loadout", "Health", true);
+			// Stored as the period in seconds; snap an out-of-range value to the nearest preset so a
+			// hand-edited ini can't yield an interval that isn't selectable in the menu.
+			int periodSec = Config.GetValue("Loadout", "SavePeriodSeconds", 2);
+			loadoutSavePeriodMs = NearestLoadoutPeriodMs(periodSec * 1000);
+
+			spoofEnabled = Config.GetValue("Spoof", "Enabled", false);
+			spoofTarget = Config.GetValue("Spoof", "Target", Identity.Franklin);
+			if (Array.IndexOf(Identity.All, spoofTarget) < 0) {
+				spoofTarget = Identity.Franklin;
+			}
 
 			ActiveSlot = Config.GetValue("State", "ActiveSlot", string.Empty);
 			SourceModel = Config.GetValue("State", "SourceModel", string.Empty);
@@ -311,13 +352,18 @@ namespace FreemodeIdentity {
 			Config.SetValue("General", "Build", buildOverride);
 			Config.SetValue("Appearance", "Enabled", Enabled);
 			Config.SetValue("Appearance", "ReturnProtagonist", ReturnProtagonist);
-			Config.SetValue("Wallet", "Enabled", walletEnabled);
-			Config.SetValue("Wallet", "Earning", earningEnabled);
-			Config.SetValue("Spoof", "Enabled", spoofEnabled);
-			Config.SetValue("Spoof", "Target", spoofTarget);
 			Config.SetValue("ManualSave", "MovingStyle", ManualMovingStyle);
 			Config.SetValue("ManualSave", "Tattoos", ManualTattoos);
 			Config.SetValue("ManualSave", "Mood", ManualMood);
+			Config.SetValue("Wallet", "Enabled", walletEnabled);
+			Config.SetValue("Wallet", "Earning", earningEnabled);
+			Config.SetValue("Loadout", "Enabled", loadoutEnabled);
+			Config.SetValue("Loadout", "Weapons", loadoutWeapons);
+			Config.SetValue("Loadout", "Armor", loadoutArmor);
+			Config.SetValue("Loadout", "Health", loadoutHealth);
+			Config.SetValue("Loadout", "SavePeriodSeconds", loadoutSavePeriodMs / 1000);
+			Config.SetValue("Spoof", "Enabled", spoofEnabled);
+			Config.SetValue("Spoof", "Target", spoofTarget);
 			Config.SetValue("State", "ActiveSlot", ActiveSlot);
 			Config.SetValue("State", "SourceModel", SourceModel);
 			Config.SetValue("State", "SpoofSourceHash", spoofSourceHash.ToString("X8"));
@@ -329,6 +375,18 @@ namespace FreemodeIdentity {
 
 		static uint ParseHashHex(string value) =>
 			uint.TryParse(value, System.Globalization.NumberStyles.HexNumber, null, out uint h) ? h : 0u;
+
+		// Snap an arbitrary interval (ms) to the closest selectable preset, so a hand-edited ini value
+		// always maps to a period the menu can display and round-trip.
+		static int NearestLoadoutPeriodMs(int ms) {
+			int best = LoadoutPeriodsMs[0];
+			foreach (int p in LoadoutPeriodsMs) {
+				if (Math.Abs(p - ms) < Math.Abs(best - ms)) {
+					best = p;
+				}
+			}
+			return best;
+		}
 
 		// Record (or clear) the ped's real model hash for stranded-hash recovery after a
 		// reload. Called right after a successful engage with spoof.OriginalHash, and on
@@ -372,6 +430,11 @@ namespace FreemodeIdentity {
 				if (EnabledItem != null) EnabledItem.Enabled = !appearanceSwitching;
 				if (AppearanceMenuItem != null) AppearanceMenuItem.Enabled = Enabled;
 				if (WalletMenuItem != null) WalletMenuItem.Enabled = walletEnabled;
+				// The loadout children are inert while the master is off; grey them so it reads as a unit.
+				if (LoadoutWeaponsItem != null) LoadoutWeaponsItem.Enabled = loadoutEnabled;
+				if (LoadoutArmorItem != null) LoadoutArmorItem.Enabled = loadoutEnabled;
+				if (LoadoutHealthItem != null) LoadoutHealthItem.Enabled = loadoutEnabled;
+				if (LoadoutPeriodItem != null) LoadoutPeriodItem.Enabled = loadoutEnabled;
 				if (SnapshotItem != null) SnapshotItem.Enabled = !busy;
 				bool hasActiveSlot = !string.IsNullOrEmpty(ActiveSlot) && XmlAppearanceStorage.Exists(ActiveSlot);
 				if (OverwriteActiveItem != null) OverwriteActiveItem.Enabled = !busy && hasActiveSlot;
@@ -583,6 +646,10 @@ namespace FreemodeIdentity {
 
 				SyncShim();
 
+				// Sample the carryables a freemode ped loses (weapons/armor/health) on the shared
+				// period so the persisted snapshot tracks what the player is actually carrying.
+				SampleLoadout();
+
 				// Periodic reminder that Edit Mode is still on while no menu is open (it's silent and
 				// not persisted, easy to forget). Hold off while any menu is open — they're editing —
 				// and reset then so the first reminder lands a full interval after they leave. Fires at
@@ -674,6 +741,85 @@ namespace FreemodeIdentity {
 			}
 
 			shim.Push(redirect, activeStat, activeBankStat, wallet.Balance, logLevel <= LogLevel.Debug ? 1 : 0);
+		}
+
+		// === Loadout: sample + restore weapons/armor/health ===============================
+
+		// True once vitals (armor/health) have been restored this session. They restore on the FIRST
+		// apply after load and on an appearance-enable — NOT on a respawn re-apply, where re-filling
+		// what the game just reset on death would soften it. Weapons, by contrast, restore on every
+		// re-apply (a recreated ped is bare). One-shot, re-armed by an explicit appearance-enable.
+		bool loadoutVitalsRestored;
+		// True once the loadout has been replayed onto the live ped at least once this session. Until
+		// then the sampler must NOT run: on a (warm) load the appearance re-apply fires a few seconds
+		// AFTER the first tick, so an early sample would read the bare just-loaded body and overwrite the
+		// stored loadout with nothing — the "loadout gone after load" bug. Gating sampling on a completed
+		// restore guarantees the store is replayed before we ever capture from the loaded ped.
+		bool loadoutRestoredOnce;
+
+		// Replay the saved loadout onto the live player ped. Called after an apply recreates the ped (it
+		// spawns bare). Weapons always (gated by their toggle); vitals only when the caller says so (cold
+		// load / appearance-enable). No-op unless the loadout feature is on.
+		void RestoreLoadout(bool includeVitals) {
+			if (!loadoutEnabled) {
+				return;
+			}
+			Ped ped = Game.Player?.Character;
+			if (ped == null || !ped.Exists()) {
+				return;
+			}
+			if (loadoutWeapons) {
+				loadout.RestoreWeapons(ped);
+			}
+			if (includeVitals) {
+				loadout.RestoreVitals(ped, loadoutArmor, loadoutHealth);
+				loadoutVitalsRestored = true;
+			}
+			loadoutRestoredOnce = true;
+			Logger.LogDebug($"Loadout restored (weapons={loadoutWeapons} vitals={includeVitals} hasWeapons={loadout.HasWeapons}).");
+		}
+
+		// Sample the live ped's loadout on the shared period. Gated to the defended freemode identity:
+		//   - Appearance must be ENABLED — the loadout belongs to the identity we wear; with appearance
+		//     off the player is a genuine protagonist (or an undefended ped), whose own loadout we must
+		//     not capture into the identity's store (the "Franklin's gear overwrote mine" bug).
+		//   - the live BODY must be freemode — a second guard so a stale Enabled flag during a swap, or a
+		//     genuine protagonist reached some other way, can't be sampled.
+		//   - the stored loadout must already have been replayed once (loadoutRestoredOnce) — see below.
+		//   - not mid-snapshot or in Edit Mode, where the ped is transient or being externally edited.
+		//   - not dying / arrested / mid-transition (checked below) — the ped is being wiped, so a sample
+		//     would capture a half-dead state.
+		void SampleLoadout() {
+			if (!loadoutEnabled || !Enabled || EditMode || SnapshotInProgress) {
+				return;
+			}
+			// Wait for the stored loadout to be replayed onto the loaded ped before sampling, or the
+			// first sample on a warm load reads the bare just-loaded body and clobbers the store.
+			if (!loadoutRestoredOnce) {
+				return;
+			}
+			if (lastLoadoutSampleMs >= 0 && Game.GameTime - lastLoadoutSampleMs < loadoutSavePeriodMs) {
+				return;
+			}
+			Ped ped = Game.Player?.Character;
+			if (ped == null || !ped.Exists() || !PlayerIdentity.IsFreemodeBody(ped)) {
+				return;
+			}
+			// Don't sample during a death, arrest, or any non-playing/faded-out transition: the ped is
+			// mid-wipe (the game strips weapons + drains health on the way down), so a sample then would
+			// store a half-dead snapshot — and on the next restore replay that broken state. Only capture
+			// a settled, in-control, faded-in freemode ped, i.e. a genuine "what I'm carrying" moment.
+			if (ped.IsDead || !GTA.UI.Screen.IsFadedIn
+					|| !Game.Player.CanControlCharacter
+					|| GTA.Native.Function.Call<bool>(GTA.Native.Hash.IS_PLAYER_BEING_ARRESTED, Game.Player, false)) {
+				return;
+			}
+			lastLoadoutSampleMs = Game.GameTime;
+			// Log only when the snapshot actually changed (CaptureFrom persisted) — at a 2s period most
+			// samples are identical, so an every-sample line would flood the log.
+			if (loadout.CaptureFrom(ped, loadoutWeapons, loadoutArmor, loadoutHealth)) {
+				Logger.LogDebug($"Loadout changed: weapons={loadout.WeaponCount} armor={loadout.Armor} health={loadout.Health}.");
+			}
 		}
 
 		// === Appearance: snapshot / apply (from AppearanceKeeper) ==========================
@@ -835,6 +981,10 @@ namespace FreemodeIdentity {
 					WornLook = ad;
 					LastAppliedPedHandle = Game.Player?.Character?.Handle ?? 0;
 					LastAutoApplyMs = Game.GameTime;
+					// The apply recreated a bare ped: restore the saved loadout. Vitals ride the same
+					// first-time-this-session gate as the auto-apply path (re-armed by appearance-enable),
+					// so enabling Appearance brings back health/armor while a routine re-apply doesn't.
+					RestoreLoadout(includeVitals: !loadoutVitalsRestored);
 					// A manual Apply during the post-revive walk-out would otherwise leave the backstop
 					// armed to fire a second, redundant swap ~15s later. (Only the timer — NOT AutoApplyDone,
 					// which the appearance-switch flow re-arms here on purpose.)
@@ -899,6 +1049,10 @@ namespace FreemodeIdentity {
 				Logger.Log($"Reapply worn look model={ad.Model} -> {(ok ? "OK" : "FAILED (model switch?)")}{(force ? " (forced)" : "")} (auto)");
 				if (ok) {
 					LastAppliedPedHandle = Game.Player?.Character?.Handle ?? 0;
+					// The re-apply recreated a bare ped: give weapons back every time. Restore vitals only
+					// the FIRST time this session (the cold-load apply) — a respawn-triggered re-apply must
+					// not re-fill the health/armor the game just reset on death.
+					RestoreLoadout(includeVitals: !loadoutVitalsRestored);
 				}
 			} catch (Exception ex) {
 				Logger.LogError(ex.ToString());
@@ -999,6 +1153,9 @@ namespace FreemodeIdentity {
 					Warn("No active slot", "- set one to apply a saved look.");
 					return;
 				}
+				// Enabling Appearance is an explicit "make me my identity" — bring vitals back with it,
+				// so re-arm the one-shot the apply below consumes.
+				loadoutVitalsRestored = false;
 				BeginAppearanceSwitch();
 				ApplySlot(ActiveSlot);
 			} else {
@@ -1188,6 +1345,7 @@ namespace FreemodeIdentity {
 					WornLook = bak;
 					LastAppliedPedHandle = Game.Player?.Character?.Handle ?? 0;
 					LastAutoApplyMs = Game.GameTime;
+					RestoreLoadout(includeVitals: !loadoutVitalsRestored);
 					Notify($"Applied backup of \"{name}\"");
 				} else {
 					Fail("Couldn't apply backup", "- the model wouldn't switch.");
@@ -1274,7 +1432,8 @@ namespace FreemodeIdentity {
 
 		bool AnyMenuVisible() =>
 			MainMenu.Visible || AppearanceMenu.Visible || SlotsMenu.Visible
-			|| ManualMenu.Visible || WalletMenu.Visible || SpoofMenu.Visible || DebugMenu.Visible;
+			|| ManualMenu.Visible || WalletMenu.Visible || SpoofMenu.Visible
+			|| LoadoutMenu.Visible || DebugMenu.Visible;
 
 		void OnKeyDown(object sender, KeyEventArgs e) {
 			// Match the key + its Shift/Ctrl/Alt modifiers, but MASK OFF other flags Windows
@@ -1293,6 +1452,7 @@ namespace FreemodeIdentity {
 				ManualMenu.Visible = false;
 				WalletMenu.Visible = false;
 				SpoofMenu.Visible = false;
+				LoadoutMenu.Visible = false;
 				DebugMenu.Visible = false;
 			} else {
 				MainMenu.Visible = true;
@@ -1316,6 +1476,12 @@ namespace FreemodeIdentity {
 			WalletEnabledItem.CheckboxChanged += (s, a) => SetWalletEnabled(WalletEnabledItem.Checked);
 			MainMenu.Add(WalletEnabledItem);
 
+			LoadoutEnabledItem = new NativeCheckboxItem("Loadout Enabled",
+				"Periodically saves your carried weapons, armor and health, and restores them when your look is applied.",
+				loadoutEnabled);
+			LoadoutEnabledItem.CheckboxChanged += (s, a) => SetLoadoutEnabled(LoadoutEnabledItem.Checked);
+			MainMenu.Add(LoadoutEnabledItem);
+
 			SpoofItem = new NativeCheckboxItem("Spoofing Enabled",
 				"~y~Required for a fully working wallet.~s~ Reads you as a protagonist so shops open, jobs pay out, and charges route to your wallet. Off = shops stay closed, and spending draws the protagonist's cash without changing their real balance.",
 				spoofEnabled);
@@ -1324,6 +1490,7 @@ namespace FreemodeIdentity {
 
 			BuildAppearanceMenu();
 			BuildWalletMenu();
+			BuildLoadoutMenu();
 			BuildSpoofMenu();
 			BuildDebugMenu();
 
@@ -1431,6 +1598,64 @@ namespace FreemodeIdentity {
 				}
 			};
 			SpoofMenu.Add(TargetItem);
+		}
+
+		// Loadout master toggle. Off makes the whole subsystem inert: OnTick's sampler and every
+		// restore key on loadoutEnabled, so flipping it stops both capture and replay. Doesn't touch
+		// the stored file — turning it back on resumes from the last snapshot.
+		void SetLoadoutEnabled(bool on) {
+			if (on == loadoutEnabled) return;
+			loadoutEnabled = on;
+			Config.SetValue("Loadout", "Enabled", loadoutEnabled);
+			Config.Save();
+			if (LoadoutEnabledItem != null) LoadoutEnabledItem.Checked = loadoutEnabled;
+		}
+
+		void BuildLoadoutMenu() {
+			LoadoutMenu = new NativeMenu("Loadout", "Loadout");
+			Pool.Add(LoadoutMenu);
+			LoadoutMenuItem = MainMenu.AddSubMenu(LoadoutMenu);
+			LoadoutMenuItem.Description = "Choose what to keep (weapons, armor, health) and how often to save it. The master switch is on the main menu.";
+
+			LoadoutWeaponsItem = new NativeCheckboxItem("Weapons",
+				"Keep your guns, ammo, attachments and tints. Restored whenever your look is re-applied.",
+				loadoutWeapons);
+			LoadoutWeaponsItem.CheckboxChanged += (s, a) => {
+				loadoutWeapons = LoadoutWeaponsItem.Checked;
+				Config.SetValue("Loadout", "Weapons", loadoutWeapons);
+				Config.Save();
+			};
+			LoadoutMenu.Add(LoadoutWeaponsItem);
+
+			LoadoutArmorItem = new NativeCheckboxItem("Armor",
+				"Keep your body armor. Restored on load and when you enable your look, not after a respawn.",
+				loadoutArmor);
+			LoadoutArmorItem.CheckboxChanged += (s, a) => {
+				loadoutArmor = LoadoutArmorItem.Checked;
+				Config.SetValue("Loadout", "Armor", loadoutArmor);
+				Config.Save();
+			};
+			LoadoutMenu.Add(LoadoutArmorItem);
+
+			LoadoutHealthItem = new NativeCheckboxItem("Health",
+				"Keep your health. Restored on load and when you enable your look, not after a respawn.",
+				loadoutHealth);
+			LoadoutHealthItem.CheckboxChanged += (s, a) => {
+				loadoutHealth = LoadoutHealthItem.Checked;
+				Config.SetValue("Loadout", "Health", loadoutHealth);
+				Config.Save();
+			};
+			LoadoutMenu.Add(LoadoutHealthItem);
+
+			LoadoutPeriodItem = new NativeListItem<string>("Save Period", LoadoutPeriodLabels);
+			LoadoutPeriodItem.Description = "How often the carried state is saved.";
+			LoadoutPeriodItem.SelectedIndex = Math.Max(0, Array.IndexOf(LoadoutPeriodsMs, loadoutSavePeriodMs));
+			LoadoutPeriodItem.ItemChanged += (s, a) => {
+				loadoutSavePeriodMs = LoadoutPeriodsMs[LoadoutPeriodItem.SelectedIndex];
+				Config.SetValue("Loadout", "SavePeriodSeconds", loadoutSavePeriodMs / 1000);
+				Config.Save();
+			};
+			LoadoutMenu.Add(LoadoutPeriodItem);
 		}
 
 		// Models the Force Model escape hatch can swap to, label -> model name. Order matches
