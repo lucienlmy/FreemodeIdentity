@@ -285,6 +285,8 @@ namespace FreemodeIdentity {
 		int spoofSettleTicks;
 		int spoofSettlePed;
 		int spoofSettleModel;
+		// Logs the auto-spoof collision-wait once per wait, not every frame.
+		bool spoofCollisionWaitLogged;
 		// Backoff after a failed auto-spoof engage so a persistently-unspoofable ped (e.g. an
 		// unhealable stranded poison) can't retry every tick — that busy-loop froze the game.
 		int autoSpoofRetryMs = -1;
@@ -853,6 +855,20 @@ namespace FreemodeIdentity {
 				spoofSettleTicks = 0;
 				return false;
 			}
+			// The spoof write lands on the SHARED freemode model-info the streamer resolves a ped's
+			// collision bound from; re-engaging before the respawn floor is solid binds the ped to the
+			// wrong physics archetype and it falls through everywhere until a reload. SwapBlockedReason
+			// already gates the appearance swap on the same window — the spoof re-engage was missing it.
+			string blocked = SwapBlockedReason();
+			if (blocked != null) {
+				if (!spoofCollisionWaitLogged) {
+					spoofCollisionWaitLogged = true;
+					Logger.LogDebug($"Auto-spoof deferred — world not settled for the model-info write ({blocked}).");
+				}
+				spoofSettleTicks = 0;
+				return false;
+			}
+			spoofCollisionWaitLogged = false;
 			int pedHandle = ped.Handle;
 			int modelHash = ped.Model.Hash;
 			if (pedHandle != spoofSettlePed || modelHash != spoofSettleModel) {
@@ -1246,15 +1262,23 @@ namespace FreemodeIdentity {
 			// still-loading protagonist resources — the broken floating-head render. The engine drives
 			// the restore through the player-switch machinery, so block the swap until it's done.
 			if (GTA.Native.Function.Call<bool>(GTA.Native.Hash.IS_PLAYER_SWITCH_IN_PROGRESS)) return "player switch in progress";
-			// Hospital respawn fall-through: right after a revive the world fades in and collision
-			// reports loaded a beat BEFORE the floor mesh under the NEW spawn point is actually solid.
-			// Block the swap while the ped is clearly hovering with no floor yet (skipped in a vehicle,
-			// where height-above-ground is meaningless). The threshold is generous so a step/curb never
-			// blocks; the real fall-through protection is now in the revive re-apply itself, which
-			// re-paints in place WITHOUT a model swap (no ped recreate = nothing to fall through).
+			// Hospital respawn fall-through: HAS_COLLISION_LOADED_AROUND_ENTITY reports loaded a beat
+			// BEFORE the floor under a fresh spawn is solid, so the height check alone let the rare
+			// fall-through slip past. Verify the floor for real — airborne with no resolvable ground Z
+			// means the collision isn't streamed yet whatever the native claims; nudge the streamer and
+			// block. Skipped in a vehicle, where height-above-ground is meaningless.
 			if (!p.IsInVehicle()) {
 				float heightAboveGround = GTA.Native.Function.Call<float>(GTA.Native.Hash.GET_ENTITY_HEIGHT_ABOVE_GROUND, p);
 				if (heightAboveGround > 3.0f) return "not grounded (floor not solid yet)";
+				if (GTA.Native.Function.Call<bool>(GTA.Native.Hash.IS_ENTITY_IN_AIR, p)) {
+					GTA.Math.Vector3 pos = p.Position;
+					bool gotGround = GTA.Native.Function.Call<bool>(GTA.Native.Hash.GET_GROUND_Z_FOR_3D_COORD,
+						pos.X, pos.Y, pos.Z, new GTA.Native.OutputArgument(), false);
+					if (!gotGround) {
+						GTA.Native.Function.Call(GTA.Native.Hash.REQUEST_COLLISION_AT_COORD, pos.X, pos.Y, pos.Z);
+						return "airborne with no ground (collision not solid yet)";
+					}
+				}
 			}
 			return null;
 		}
