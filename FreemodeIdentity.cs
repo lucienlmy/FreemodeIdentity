@@ -487,6 +487,15 @@ namespace FreemodeIdentity {
 				// the gate is momentarily closed is never missed. (revived consumed below.)
 				bool isDead = player != null && player.IsDead;
 				bool revived = WasDead && !isDead;
+				// Drop the spoof the instant death is detected, BEFORE the hospital respawn runs.
+				// Dying while spoofed leaves a protagonist hash painted on the shared freemode
+				// model-info; the respawn machinery then streams the new ped against that poisoned
+				// info and the load never completes — an infinite black screen. Releasing here lets
+				// the respawn run on a clean freemode body. (The clobber path below still drops it as
+				// a no-op fallback; the re-engage waits out the respawn via AutoSpoofReady's settle.)
+				if (isDead && !WasDead && spoof.Held) {
+					spoof.Stop("death edge");
+				}
 				WasDead = isDead;
 
 				// Arrest edge — arg2 false asks for the busted state (held through the police-station
@@ -501,6 +510,11 @@ namespace FreemodeIdentity {
 				bool released = false;
 				if (defendActive) {
 					released = WasArrested && !isArrested;
+					// Same poison release as the death edge: the busted walk-out is a respawn-style
+					// sequence too, so drop the spoof before it runs against the model-info.
+					if (isArrested && !WasArrested && spoof.Held) {
+						spoof.Stop("arrest edge");
+					}
 					WasArrested = isArrested;
 				} else {
 					WasArrested = false;
