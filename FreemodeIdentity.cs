@@ -1038,6 +1038,17 @@ namespace FreemodeIdentity {
 			// still-loading protagonist resources — the broken floating-head render. The engine drives
 			// the restore through the player-switch machinery, so block the swap until it's done.
 			if (GTA.Native.Function.Call<bool>(GTA.Native.Hash.IS_PLAYER_SWITCH_IN_PROGRESS)) return "player switch in progress";
+			// Hospital respawn fall-through: right after a revive the world fades in and collision
+			// reports loaded a beat BEFORE the floor mesh under the NEW spawn point is actually solid.
+			// A forced SET_PLAYER_MODEL then recreates the ped onto an unsolid floor and it drops
+			// through. The tell is the ped sitting in the air with nothing under it — block the swap
+			// until it's grounded (or in a vehicle, where height-above-ground is meaningless). The
+			// threshold is generous so a step/curb never blocks; only a real "no floor yet" gap (the
+			// ped hovering metres up post-respawn) trips it.
+			if (!p.IsInVehicle()) {
+				float heightAboveGround = GTA.Native.Function.Call<float>(GTA.Native.Hash.GET_ENTITY_HEIGHT_ABOVE_GROUND, p);
+				if (heightAboveGround > 3.0f) return "not grounded (floor not solid yet)";
+			}
 			return null;
 		}
 
