@@ -18,8 +18,8 @@ It merges these jobs into one mod:
   health, and applying your look respawns the ped bare. Freemode Identity keeps them
   for you and restores them with your look.
 - **Skills** - a freemode ped's ability skills (strength, stamina, shooting...) never
-  progress on their own. Freemode Identity lets you set a skill profile that actually
-  takes effect in gameplay while you're spoofed.
+  progress on their own. Freemode Identity lets you set a profile that actually takes
+  effect in gameplay while you're spoofed.
 
 It does not author looks - that's left to a full customizer (e.g.
 [Menyoo](https://www.gta5-mods.com/scripts/menyoo-pc-sp)). Freemode Identity
@@ -39,10 +39,9 @@ moving style, mood, and tattoos.
 Most of it is read back through native getters. A few fields the game exposes **no
 getter** for - the micro-morphs, overlay tint/opacity, hair tint, moving style, mood,
 and tattoos - are read directly from the live ped's memory. Every memory read is
-bounds-checked and locates its data by content (not a hard-coded address), so a read
-that doesn't line up falls back to native-only capture rather than applying anything
-wrong. The heavier scans run off the main thread across frames, so saving never
-freezes the game.
+bounds-checked and locates its data by content (not a hard-coded address), so a read that
+doesn't line up falls back to native-only capture rather than writing anything wrong. The
+heavier scans run off the main thread across frames, so saving never freezes the game.
 
 A Menyoo **randomizer** face (and addon/custom models) lives outside the head-blend
 system and can't round-trip; the mod detects this, warns at save time, and leaves the
@@ -61,14 +60,13 @@ so shops open and money resolves to that protagonist's cash stat. A tiny native
 to the wallet - the one piece managed code can't do, since SHVDN can't hook natives.
 
 The wallet earns from cash pickups (read straight from the pickup object) and from job
-payouts that flow through the stat while spoofed. Spending **only sticks with the
-wallet on**: with it off, a purchase completes but the protagonist's real balance never
-changes (the shop pokes a cash mirror the game reverts), so the wallet redirect is what
-makes money real.
+payouts that flow through the stat while spoofed. Spending **only sticks with the wallet
+on**: with it off a purchase completes but the protagonist's real balance never changes
+(the shop pokes a cash mirror the game reverts).
 
 Because the wallet rides the protagonist's own cash stat, the rest of the game reads it
-as real money: **ATMs show the right balance**, and external job mods
-pay into and charge it correctly. Tested with
+as real money: **ATMs show the right balance**, and external job mods pay into and charge
+it correctly. Tested with
 [Casual Jobs (Rabbit Holes)](https://www.gta5-mods.com/scripts/casual-jobs-rabbit-holes),
 [Driver Jobs V](https://www.gta5-mods.com/scripts/driverjobs-v) and
 [Vehicle Market](https://www.gta5-mods.com/scripts/vehicle-market) - job payouts and
@@ -78,31 +76,28 @@ vehicle purchases land on the wallet while spoofed.
 
 A freemode character isn't a real save subject, so an in-game save keeps none of its
 **weapons, armor or health** - and re-applying your look does a model swap that respawns
-the ped empty. The Loadout feature closes that gap: it periodically snapshots what you're
-carrying to `loadout.dat` and replays it onto the freshly-applied ped.
+the ped empty. The Loadout feature periodically snapshots what you're carrying to
+`loadout.dat` and replays it onto the freshly-applied ped.
 
 Weapons keep their **ammo, tint and attachments** (scopes, suppressors, grips, extended
-mags, and liveries with their camo colour). Each is an independent toggle, with a
+mags, and liveries with their camo colour). Each is an independent toggle with a
 configurable save period. Weapons come back on every re-apply; **armor and health restore
-on load and when you enable your look, but not after a normal death** - re-filling what the
-game just reset on a respawn would soften death. Sampling only runs on a settled freemode
-ped, never while you're dying, busted or mid-transition, so a half-dead state is never
-stored.
+on load and when you enable your look, but not after a normal death** - re-filling what a
+respawn just reset would soften death. Sampling only runs on a settled freemode ped, never
+while you're dying, busted or mid-transition, so a half-dead state is never stored.
 
 ## Skills
 
 A freemode character's ability skills (strength, stamina, shooting, stealth, flying,
-driving, lung capacity) **never level up** - the game's skill-progression scripts only
-run for a real story protagonist, and spoofing doesn't change that. So instead of
-preserving earned progress, the Skills feature lets you **set a profile** that the game
-honours: pick a value (0-100) per skill and, while you're spoofed, your freemode
-character reads and plays with those skills instead of the protagonist's.
+driving, lung capacity) **never level up** - the game's skill-progression scripts only run
+for a real story protagonist. So rather than preserve earned progress, this feature lets
+you **set a profile**: a value (0-100) per skill that your freemode character reads and
+plays with while spoofed.
 
-The values can't be held through the normal stat natives (the game reverts them), so the
-native shim writes them straight into the live stat object each frame - the same place
-the gameplay code reads, so a low stamina really does limit sprinting. Turning Skills off
-restores the real values cleanly and stops touching them, so another skills mod can take
-over by simply leaving this feature off.
+The game reverts these through the normal stat natives, so the native shim writes them
+straight into the live stat object each frame - the same place gameplay reads, so a low
+stamina really does limit sprinting. Turning Skills off restores the real values and stops
+touching them, leaving another skills mod free to take over.
 
 ## Install
 
@@ -122,14 +117,14 @@ the active slot while appearance is on, and the wallet balance while the wallet 
 
 The first item is the master switch:
 
-- **Enabled** - the single on/off for the whole mod. **Off by default**, so a fresh
-  install does nothing until you turn it on. Off makes everything inert and swaps you back
-  to your story character; on runs each feature per its own toggle. Each feature lives in
-  its own submenu below, with its **Enabled** toggle as the first item there.
+- **Enabled** - the single on/off for the whole mod. **Off by default**: a fresh install
+  does nothing until you turn it on. Off makes everything inert and swaps you back to your
+  story character; on runs each feature per its own toggle. Each feature lives in its own
+  submenu below, with its **Enabled** toggle first.
 
-While the master is off the menu stays a **config screen** - you can still set every
-toggle and value (they just record your intent for when you turn it on); only the live
-actions that touch the ped right now (Save / Overwrite / Apply / Edit Mode) are greyed.
+While the master is off the menu stays a **config screen** - every toggle and value is
+still editable (they just record intent for when you turn it on); only the live actions
+that touch the ped (Save / Overwrite / Apply / Edit Mode) are greyed.
 
 Submenus:
 
@@ -164,9 +159,9 @@ Submenus:
     lung capacity), in steps of 5. Values save immediately and take effect once spoofed.
 - **Spoofing ▸**
   - **Spoofing Enabled** - read as a protagonist so shops open and jobs pay out. **On by
-    default**, so flipping the master on is enough to get the wallet working. It records
-    intent and engages once you're a freemode character and the mod is on - so it's safe to
-    leave on even while you're a story protagonist (it just won't engage until you're not).
+    default**, so turning the master on is enough to get the wallet working. It records
+    intent and engages once you're a freemode character - safe to leave on as a story
+    protagonist (it just won't engage until you're not).
   - **Target** - which protagonist to impersonate.
 - **Debug ▸** - log level, live identity read-outs, and a force-model escape hatch.
 
@@ -269,10 +264,9 @@ commit builds and publishes a release - the tag is the version source of truth.
 The wallet redirect hooks `STAT_GET_INT` and `STAT_SET_INT` on the active cash stat
 (`SP0`/`SP1`/`SP2_TOTAL_CASH`) **and** the matching bank stat
 (`SP0`/`SP1`/`SP2_BANK_BALANCE`). So if your mod touches the player's money the conventional
-way - `Game.Player.Money` (SHVDN), the equivalent `STAT_GET_INT`/`STAT_SET_INT` natives, or
-either of those stats directly - it works with Freemode Identity automatically: while spoofing
-is on, those reads and writes land on the wallet instead of the protagonist's real balance,
-with nothing extra to integrate. Cash and bank both resolve to the one wallet total.
+way - `Game.Player.Money` (SHVDN), the equivalent natives, or those stats directly - it
+works with Freemode Identity automatically: while spoofing is on, those reads and writes land
+on the wallet, nothing extra to integrate. Cash and bank both resolve to the one wallet total.
 
 ## License
 

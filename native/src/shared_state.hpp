@@ -36,9 +36,10 @@ struct ShimBridgeState {
 	int32_t reserved;         // padding to an even int count so decorationBase stays 8-aligned
 	// Skill redirect: pin the spoofed protagonist's SP{N} skill stats to a user-set profile. Unlike
 	// cash, skills aren't transacted — the game's stat system keeps REVERTING a managed write back to
-	// the real protagonist's saved values, so a pure-C# set can't hold. The shim answers a GET on any
-	// of these hashes with the matching value and SWALLOWS a SET, so our profile wins. C# fills the
-	// hashes for the active spoof target and the values from the profile; both 0 when nothing to pin.
+	// the real protagonist's saved values, so a pure-C# set can't hold. The shim instead writes each
+	// value straight into the stat object in memory every frame (TickPinnedSkills via stats.cpp), which
+	// the manager does NOT revert; the GET hook only masks the displayed value. C# fills the hashes for
+	// the active spoof target and the values from the profile; both 0 when nothing to pin.
 	int32_t skillsPinned;                  // C# -> shim: 1 = pin the skill stats below (Skills on + spoofed)
 	int32_t skillHashes[SHIM_SKILL_COUNT]; // C# -> shim: the active SP{N}_<skill> joaats to redirect
 	int32_t skillValues[SHIM_SKILL_COUNT]; // C# -> shim: the profile value (0..100) for each hash

@@ -448,10 +448,6 @@ namespace FreemodeIdentity {
 			try {
 				Pool.Process();
 
-				// A disabled feature's whole submenu is greyed so its now-inert controls aren't
-				// reachable (the master checkbox is the only way back on). Within Appearance, the
-				// slot controls are additionally greyed mid-snapshot so a re-press can't Apply the
-				// stale pre-capture file or restart the deferred finders.
 				// Close the appearance-switch window only once the swap has FULLY settled — the look
 				// applied and the spoof reached its intended state — so the master toggle can't be
 				// re-pressed until the model swap (and any spoof re-engage) is truly done. A hard

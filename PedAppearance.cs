@@ -5,9 +5,8 @@ using GTA;
 using GTA.Native;
 
 namespace FreemodeIdentity {
-	// The struct GET_PED_HEAD_BLEND_DATA writes through its out-pointer. Fixed game layout:
-	// ints 8-aligned, isParent at 75, total 80 bytes. Verified against SHVDN's HeadBlendData;
-	// read back via OutputArgument.AllocForType<T>() + GetResultAsBlittableStruct<T>().
+	// GET_PED_HEAD_BLEND_DATA writes through an out-pointer. Fixed game layout: ints 8-aligned,
+	// isParent at 75, total 80 bytes (verified against SHVDN's HeadBlendData).
 	[StructLayout(LayoutKind.Explicit, Size = 80)]
 	struct HeadBlendData {
 		[FieldOffset(0)] public int ShapeFirst;
@@ -24,23 +23,19 @@ namespace FreemodeIdentity {
 
 	// The capture/apply layer for the freemode (MP) player appearance.
 	//
-	// SHVDN3 wraps clothing (Style/PedComponent) but NOT the head-creation natives
-	// (heritage blend, head overlays, blend eye/hair colour), so those go through
-	// Function.Call(Hash.…). Most of those getters return their result through an
-	// out-pointer; SHVDN3's OutputArgument marshals it, so we can read them back —
-	// heritage (face shape + skin tone), head overlays and hair tint are captured,
-	// not just applied.
+	// SHVDN3 wraps clothing but NOT the head-creation natives (heritage blend, head overlays,
+	// blend eye/hair colour), so those go through Function.Call — and since those getters return
+	// through an out-pointer SHVDN3 can marshal, we can capture them, not just apply them.
 	//
-	// A few fields have no readback native and are recovered from live memory (a native
-	// snapshot would otherwise default them): the 20 face micro-morphs (SET_PED_MICRO_MORPH
-	// has no getter) + overlay/hair tint, and the movement clipset (read from memory). Apply order: model first,
-	// then head-blend, then features/overlays/components.
+	// A few fields have no readback native at all and are recovered from live memory (a native
+	// snapshot would default them): the 20 face micro-morphs (SET_PED_MICRO_MORPH has no getter),
+	// overlay/hair tint, and the movement clipset. Apply order is load-bearing: model first, then
+	// head-blend, then features/overlays/components.
 	public static class PedAppearance {
-		// Which of the optional, memory-read fields a capture should include. The three here
-		// are the costly / opt-out-able ones: tattoos (a memory sweep), mood and moving style
-		// (deferred/memory reads). Everything else is always captured. Manual snapshots use
-		// `All`; autosave passes per-feature toggles. A field left out is stored empty, and
-		// apply treats empty as "leave the model default" (tattoos: leave the ped's as-is).
+		// The optional capture fields, gated because they're the costly reads: tattoos (a memory
+		// sweep), mood and moving style (deferred/memory reads). Everything else is always captured.
+		// A field left out is stored empty, and apply treats empty as "leave the model default"
+		// (tattoos: leave the ped's as-is) — so a toggled-off feature never overwrites with blanks.
 		public struct CaptureOptions {
 			public bool Tattoos;
 			public bool Mood;

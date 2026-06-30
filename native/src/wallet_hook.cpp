@@ -120,10 +120,9 @@ void HookStatSetInt(rage::scrNativeCallContext* ctx) {
 	int statHash = ctx->GetArg<int>(0);
 	int pinned;
 	if (TryPinnedSkill(statHash, &pinned)) {
-		// Swallow the write: the game's stat system keeps reverting skill writes back to the real
-		// protagonist's saved values, so dropping the SET (and answering the GET below from our
-		// profile) is what makes the chosen skills actually hold. Our own initial set comes through
-		// the same hook but is equally unnecessary — the GET redirect is the source of truth.
+		// Swallow a managed SET on a pinned skill so it can't fight our value. The actual hold is the
+		// per-frame memory write in TickPinnedSkills (which the manager doesn't revert); this just keeps
+		// a stray STAT_SET_INT from clobbering the stat for the frames between our re-asserts.
 		return;
 	}
 	if (ShouldRedirect(statHash)) {
