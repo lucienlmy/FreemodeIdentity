@@ -42,7 +42,7 @@ namespace FreemodeIdentity {
 				}
 				attempted = true;
 				enhancedEntries = shimEntries;
-				Logger.Log($"WaypointKeeper: WaypointInfoArray entries (shim) @ {shimEntries[0].ToInt64():X} {shimEntries[1].ToInt64():X} {shimEntries[2].ToInt64():X} {shimEntries[3].ToInt64():X}.");
+				Logger.LogDebug($"WaypointKeeper: WaypointInfoArray entries (shim) @ {shimEntries[0].ToInt64():X} {shimEntries[1].ToInt64():X} {shimEntries[2].ToInt64():X} {shimEntries[3].ToInt64():X}.");
 				return true;
 			}
 
@@ -55,7 +55,7 @@ namespace FreemodeIdentity {
 			}
 			legacyStart = (IntPtr)(startHit.ToInt64() + 7 + MemScan.ReadInt32(startHit + 3));
 			legacyEnd = (IntPtr)(endHit.ToInt64() + 7 + MemScan.ReadInt32(endHit + 3));
-			Logger.Log($"WaypointKeeper: WaypointInfoArray @ {legacyStart.ToInt64():X}..{legacyEnd.ToInt64():X}.");
+			Logger.LogDebug($"WaypointKeeper: WaypointInfoArray @ {legacyStart.ToInt64():X}..{legacyEnd.ToInt64():X}.");
 			return true;
 		}
 

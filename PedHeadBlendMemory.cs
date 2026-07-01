@@ -177,7 +177,7 @@ namespace FreemodeIdentity {
 			findRunning = true; // hold the deferred snapshot until settle+walk resolve (or time out)
 			if (!ArmWalk()) {
 				// Heritage not readable yet — wait for the blend to settle (driven by TickFind).
-				Logger.Log("PedHeadBlendMemory: head blend not ready — waiting for it to settle.");
+				Logger.LogDebug("PedHeadBlendMemory: head blend not ready — waiting for it to settle.");
 			}
 		}
 
@@ -220,10 +220,10 @@ namespace FreemodeIdentity {
 				// Snapshot now, before any later ped churn (e.g. the tattoo capture) can relocate it.
 				foundStruct = MemScan.Snapshot(cachedMix, StructSpan);
 				findRunning = false;
-				Logger.Log($"PedHeadBlendMemory: mix cache HIT (mix={cachedMix.ToInt64():X}).");
+				Logger.LogDebug($"PedHeadBlendMemory: mix cache HIT (mix={cachedMix.ToInt64():X}).");
 				return true;
 			}
-			Logger.Log($"PedHeadBlendMemory: mix cache MISS (heritage={findShape},{findSkin},{findThird}) — walking graph.");
+			Logger.LogDebug($"PedHeadBlendMemory: mix cache MISS (heritage={findShape},{findSkin},{findThird}) — walking graph.");
 			findBlocks = 0;
 			// Tight block cap: the mix-start is reached EARLY once the hop depth is right (Enhanced
 			// 128-330, Legacy ~177), so 3000 is comfortable margin while bailing the not-found case
@@ -306,7 +306,7 @@ namespace FreemodeIdentity {
 					settleStartMs = Game.GameTime;
 				}
 				if (Game.GameTime - settleStartMs >= SettleBudgetMs) {
-					Logger.LogError($"PedHeadBlendMemory: head blend never became readable (last rejected mix: {lastRejectedMix}); skipping memory read (keeping defaults).");
+					Logger.Log($"PedHeadBlendMemory: head blend never became readable (last rejected mix: {lastRejectedMix}); skipping memory read (keeping defaults).");
 					findRunning = false;
 				}
 				return;
@@ -345,7 +345,7 @@ namespace FreemodeIdentity {
 							foundStruct = MemScan.Snapshot(cand, StructSpan);
 							findRunning = false;
 							findWalker = null;
-							Logger.Log($"PedHeadBlendMemory: mix FOUND after {findBlocks} blocks (mix={cand.ToInt64():X}).");
+							Logger.LogDebug($"PedHeadBlendMemory: mix FOUND after {findBlocks} blocks (mix={cand.ToInt64():X}).");
 							return;
 						}
 					}
@@ -357,7 +357,7 @@ namespace FreemodeIdentity {
 				if (sw.ElapsedMilliseconds < FindBudgetMs) {
 					findRunning = false;
 					findWalker = null;
-					Logger.LogError($"PedHeadBlendMemory: mix NOT found after {findBlocks} blocks (graph exhausted).");
+					Logger.Log($"PedHeadBlendMemory: mix NOT found after {findBlocks} blocks (graph exhausted).");
 				}
 			} catch (Exception e) {
 				Logger.LogError("PedHeadBlendMemory.TickFind: " + e);
@@ -383,7 +383,7 @@ namespace FreemodeIdentity {
 			// this save — the user isn't editing mid-snapshot.
 			byte[] s = StructSnapshot;
 			if (s == null || s.Length < StructSpan) {
-				Logger.LogError("PedHeadBlendMemory: could not locate CPedHeadBlendData for this ped; keeping defaults.");
+				Logger.Log("PedHeadBlendMemory: could not locate CPedHeadBlendData for this ped; keeping defaults.");
 				return false;
 			}
 

@@ -40,14 +40,14 @@ namespace FreemodeIdentity {
 
 			IntPtr hit = Game.FindPattern(GlobalPtrPattern);
 			if (hit == IntPtr.Zero) {
-				Logger.Log("DecorationBaseScan: global-ptr pattern not found (encrypted .text?) and no shim base — skipping tattoos this snapshot.");
+				Logger.LogDebug("DecorationBaseScan: global-ptr pattern not found (encrypted .text?) and no shim base — skipping tattoos this snapshot.");
 				return false;
 			}
 			int disp = MemScan.ReadInt32(hit + 3);
 			IntPtr globalPtrAddr = (IntPtr)(hit.ToInt64() + 7 + disp);
 			IntPtr arrayBase = MemScan.SafeReadPtr(globalPtrAddr); // one deref → PedEntry array base
 			if (arrayBase == IntPtr.Zero) {
-				Logger.Log("DecorationBaseScan: array base null — skipping tattoos this snapshot.");
+				Logger.LogDebug("DecorationBaseScan: array base null — skipping tattoos this snapshot.");
 				return false;
 			}
 			PedDecorationMemory.SetBase(arrayBase);

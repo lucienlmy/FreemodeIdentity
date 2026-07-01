@@ -369,11 +369,10 @@ namespace FreemodeIdentity {
 		void LoadConfig() {
 			masterEnabled = Config.GetValue("General", "Enabled", false);
 			menuKey = Config.GetValue("General", "MenuKey", Keys.Shift | Keys.X);
-			// Default to Debug for the 0.x pre-releases so every reported issue arrives with full
-			// triage detail without asking the user to re-run. No path logs per tick, so the file
-			// stays small. Flip this back to Info at 1.0. The menu description still says Info — the
-			// user-facing "normal" level — on purpose.
-			logLevel = ParseLogLevel(Config.GetValue("General", "LogLevel", nameof(LogLevel.Debug)));
+			// Info by default: it carries the once-per-session triage facts (version, edition,
+			// resolved config, capture/spoof/wallet transitions) that resolve most reports, while the
+			// per-snapshot memory-walk chatter sits at Debug for when a report needs deeper detail.
+			logLevel = ParseLogLevel(Config.GetValue("General", "LogLevel", nameof(LogLevel.Info)));
 			Logger.Threshold = logLevel;
 
 			// Edition select: "Auto" (default) auto-detects Enhanced vs Legacy by host module
