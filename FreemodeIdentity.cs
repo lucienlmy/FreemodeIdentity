@@ -2127,7 +2127,7 @@ namespace FreemodeIdentity {
 			SkillsMenuItem.Description = "Set your character's skill levels — they don't level up on their own.";
 
 			SkillsEnabledItem = new NativeCheckboxItem("Enabled",
-				"Applies your chosen skill profile (strength, stamina, shooting...) while spoofed; your story character's real skills come back when you turn it off. Set the values below.",
+				"Applies your chosen skill profile (strength, stamina, shooting...) while spoofed - your story character's real skills come back when you turn it off. Set the values below.",
 				skillsEnabled);
 			SkillsEnabledItem.CheckboxChanged += (s, a) => SetSkillsEnabled(SkillsEnabledItem.Checked);
 			SkillsMenu.Add(SkillsEnabledItem);
