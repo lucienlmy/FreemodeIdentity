@@ -1840,7 +1840,7 @@ namespace FreemodeIdentity {
 			// feature submenus, each carrying its own Enabled toggle; the master gates them all while
 			// their individual states persist. Spoofing stays last (it's the most situational).
 			MasterEnabledItem = new NativeCheckboxItem("Enabled",
-				"Master switch. Off makes the whole mod inert. On runs each feature per its own toggle in the submenus below.",
+				"Master switch. ~y~Off makes the whole mod inert~s~ and returns your story character. On runs each feature per its own toggle in the submenus below.",
 				masterEnabled);
 			MasterEnabledItem.CheckboxChanged += (s, a) => SetMasterEnabled(MasterEnabledItem.Checked);
 			MainMenu.Add(MasterEnabledItem);
@@ -1967,13 +1967,13 @@ namespace FreemodeIdentity {
 			WalletMenuItem.Description = "Earn from pickups and route shop charges here while spoofing.";
 
 			WalletEnabledItem = new NativeCheckboxItem("Enabled",
-				"Turn off to stop earning from pickups and routing shop charges to your wallet.",
+				"The wallet itself. Off makes it inert - no earning and no shop charges routed here, whatever the toggles below say.",
 				walletEnabled);
 			WalletEnabledItem.CheckboxChanged += (s, a) => SetWalletEnabled(WalletEnabledItem.Checked);
 			WalletMenu.Add(WalletEnabledItem);
 
 			PickupsItem = new NativeCheckboxItem("Pickups Enabled",
-				"Credit the wallet the real value of collected cash pickups. Turn off to also stop scanning for them if you hit FPS trouble in pickup-heavy scenes.",
+				"Credit the wallet the real value of collected cash pickups. Scans nearby pickups, so a big pile of drops around you can cost FPS - ~y~turn off to stop scanning~s~ if that happens.",
 				pickupsEnabled);
 			PickupsItem.CheckboxChanged += (s, a) => {
 				pickupsEnabled = PickupsItem.Checked;
@@ -2127,7 +2127,7 @@ namespace FreemodeIdentity {
 			SkillsMenuItem.Description = "Set your character's skill levels — they don't level up on their own.";
 
 			SkillsEnabledItem = new NativeCheckboxItem("Enabled",
-				"Applies your chosen skill profile (strength, stamina, shooting...) while spoofed. Set the values below.",
+				"Applies your chosen skill profile (strength, stamina, shooting...) while spoofed; your story character's real skills come back when you turn it off. Set the values below.",
 				skillsEnabled);
 			SkillsEnabledItem.CheckboxChanged += (s, a) => SetSkillsEnabled(SkillsEnabledItem.Checked);
 			SkillsMenu.Add(SkillsEnabledItem);
