@@ -545,6 +545,23 @@ namespace FreemodeIdentity {
 
 				Ped player = Game.Player?.Character;
 
+				// Master OFF = the mod does NO per-frame work. SetEnabled(false) already reverted the
+				// active state (dropped the spoof, returned to the protagonist) on the falling edge, so
+				// once the disable swap has settled there is nothing to defend or sync — skip the whole
+				// feature block (spoof/earning/shim/loadout/death-arrest/auto-apply) and only keep the
+				// menu tail live so the config screen still refreshes. `appearanceSwitching` keeps the
+				// block running through the disable swap itself so it can complete.
+				if (!masterEnabled && !appearanceSwitching) {
+					if (AnyMenuVisible()) {
+						SyncSpoofItem();
+						RefreshSpoofAvailability();
+					}
+					if (DebugMenu.Visible) {
+						RefreshDebugMenu();
+					}
+					return;
+				}
+
 				// One-time stranded-hash recovery: if we reloaded WHILE spoofed, the previous
 				// instance's hash write is still on the ped but the hold is gone, so the ped reads
 				// as the target protagonist with nothing holding it. Using the real model hash we

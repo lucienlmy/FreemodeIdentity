@@ -7,7 +7,7 @@ namespace FreemodeIdentity {
 	// credits the protagonist SP cash bucket, which a freemode char (even fully spoofed)
 	// doesn't resolve to (verified in-game). So we credit the wallet ourselves: read each
 	// money pickup's TRUE value straight from its object struct, and when a tracked money
-	// pickup leaves the world pool (= collected), add that value to the wallet.
+	// pickup leaves the scan (= collected), add that value to the wallet.
 	//
 	// Pickup object struct offsets (build VER_EN_1_0_1013_34, found by a sentinel
 	// ground-truth probe): cash VALUE is an int at +0x480, pickup TYPE hash at +0x468.
@@ -33,25 +33,38 @@ namespace FreemodeIdentity {
 			0xA3435C38, // PICKUP_MONEY_PAPER_TRAIL
 		};
 
-		// What we knew last sample about a tracked money pickup: its value, and whether we
-		// already credited it (so collection + disappearance on different samples can't
-		// double-count).
+		// What we knew last sample about a tracked money pickup: its value, whether we already
+		// credited it (so collection + disappearance on different samples can't double-count), and
+		// its last-seen position (to tell a collection from the player walking past the scan edge).
 		struct Tracked {
 			public int Value;
 			public bool Credited;
+			public GTA.Math.Vector3 Pos;
 		}
 		// Double-buffered and swapped each sample so the steady state allocates nothing — the
 		// per-frame `new Dictionary` was needless GC churn in pickup-heavy scenes.
 		Dictionary<int, Tracked> tracked = new Dictionary<int, Tracked>();
 		Dictionary<int, Tracked> scratch = new Dictionary<int, Tracked>();
 
-		// Scanning the whole pickup pool (a VirtualQuery per pickup) every frame was the mod's
-		// heaviest cost in busy interiors — a gun shop or police fight floods the pool, so the
-		// cost climbed with the scene and tanked FPS. Money pickups are walk-into-collect and sit
-		// on the ground until touched, so a few samples per second catches every one well before
-		// it's collected; 60 Hz bought nothing. ~6 Hz cuts the work ~10x with no functional loss.
+		// Money pickups are walk-into-collect and sit on the ground until touched, so a few samples
+		// per second catches every one well before it's collected; 60 Hz bought nothing.
 		const int SamplePeriodMs = 160;
 		int lastSampleMs = -1;
+
+		// Scan only pickups near the player, NOT the whole map's pool. The pool walk creates a script
+		// GUID + managed Prop per returned pickup, and a firefight floods the pool with weapon drops —
+		// scanning them all cost 20-60ms/sample and tanked FPS. GetNearbyPickupObjects runs its
+		// distance cull BEFORE that per-pickup cost, so a tight radius pays only for nearby pickups.
+		//
+		// The radius costs NO reliability: money is collected at contact (~2m), and at ~6 Hz sampling
+		// the player can't cross this radius and touch a pickup within one 160ms gap (that'd need
+		// >60 m/s on foot), so every collectible pickup is always seen at least once before it's
+		// taken. It only needs to exceed the per-sample travel distance, not cover the map. Works on
+		// any SHVDN fork (no pinned pool offsets), so it's the single path for both editions.
+		const float ScanRadius = 10f;
+		// A pickup that vanished within this of the player was collected; farther means it just slid
+		// out of the scan radius as the player moved. Comfortably above contact range.
+		const float CollectDist = 4f;
 
 		// Read a money pickup object's value from its struct. False if the object has no readable
 		// struct or isn't a money-pickup type. `obj` is the world pickup object (a Prop); its
@@ -86,27 +99,31 @@ namespace FreemodeIdentity {
 			}
 			lastSampleMs = nowMs;
 
-			Prop[] pickups = World.GetAllPickupObjects();
+			Ped player = Game.Player?.Character;
+			if (player == null || !player.Exists()) {
+				return;
+			}
+			GTA.Math.Vector3 playerPos = player.Position;
 			Dictionary<int, Tracked> now = scratch;
 			now.Clear();
 
-			foreach (Prop p in pickups) {
+			foreach (Prop p in World.GetNearbyPickupObjects(playerPos, ScanRadius)) {
 				if (!ReadMoneyPickup(p, out int value)) {
 					continue;
 				}
 				bool credited = tracked.TryGetValue(p.Handle, out Tracked prev) && prev.Credited;
-				now[p.Handle] = new Tracked { Value = value, Credited = credited };
+				now[p.Handle] = new Tracked { Value = value, Credited = credited, Pos = p.Position };
 			}
 
-			// A money pickup tracked last sample is gone now = collected (tiny street cash
-			// vanishes on contact, too fast for a collected-flag check). Credit its cached value once.
+			// A money pickup tracked last sample is gone now = collected (tiny street cash vanishes
+			// on contact, too fast for a collected-flag check). Only credit if it vanished NEAR the
+			// player — a far-away vanish is just the pickup sliding out of the scan radius as the
+			// player moved, not a collection. Credit the cached value once.
 			foreach (KeyValuePair<int, Tracked> kv in tracked) {
 				if (kv.Value.Credited) continue;
-				if (!now.ContainsKey(kv.Key)) {
-					if (enabled) {
-						wallet.Add(kv.Value.Value);
-						Logger.Log($"Earning: collected ${kv.Value.Value} -> wallet ${wallet.Balance}.");
-					}
+				if (!now.ContainsKey(kv.Key) && enabled && playerPos.DistanceTo(kv.Value.Pos) <= CollectDist) {
+					wallet.Add(kv.Value.Value);
+					Logger.Log($"Earning: collected ${kv.Value.Value} -> wallet ${wallet.Balance}.");
 				}
 			}
 

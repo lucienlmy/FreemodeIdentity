@@ -91,6 +91,15 @@ namespace FreemodeIdentity {
 			return IsReadable(addr, 4) ? Marshal.ReadInt32(addr) : 0;
 		}
 
+		// Ungated raw reads — NO VirtualQuery. ONLY for an address a caller already proved committed
+		// this session and that can't have moved since (e.g. the spoof's held slot, re-validated
+		// whenever the ped handle changes). The gated versions cost a syscall each; on a per-frame
+		// re-assert of a known-good address that syscall was the dominant cost. Never call these on a
+		// pointer freshly pulled out of game memory — an unmapped read here is an uncatchable access
+		// violation that kills the process.
+		public static uint ReadUInt32Raw(IntPtr addr) => unchecked((uint)Marshal.ReadInt32(addr));
+		public static int ReadInt32Raw(IntPtr addr) => Marshal.ReadInt32(addr);
+
 		// Write a u32, temporarily flipping the page to PAGE_READWRITE if needed and
 		// restoring the original protection after. VirtualQuery-gated like the reads.
 		// Returns false (writing nothing) if the page is unreadable or the flip fails.

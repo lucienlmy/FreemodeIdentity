@@ -251,12 +251,15 @@ namespace FreemodeIdentity {
 				}
 
 				// Hot path: addresses validated and the handle hasn't changed, so just keep the spoof
-				// value asserted with guarded writes — no natives, no VirtualQuery. heldHashAddr was
-				// proven readable at engage and can't have moved without a handle change.
-				if (MemScan.ReadUInt32(heldHashAddr) != spoofHash) {
+				// value asserted. The per-frame re-assert reads are UNGATED — the gated read's
+				// VirtualQuery ran twice every frame (~0.5ms) just to re-verify an unchanging value.
+				// The slow path above already proved these addresses committed for this handle, and
+				// neither can move without a handle change, so the syscall is pure waste here. Writes
+				// stay guarded — they're rare (only on drift) and keep the protection-flip safety.
+				if (MemScan.ReadUInt32Raw(heldHashAddr) != spoofHash) {
 					MemScan.WriteUInt32(heldHashAddr, spoofHash);
 				}
-				if (heldIndexAddr != IntPtr.Zero && MemScan.ReadInt32(heldIndexAddr) != spoofIndex) {
+				if (heldIndexAddr != IntPtr.Zero && MemScan.ReadInt32Raw(heldIndexAddr) != spoofIndex) {
 					MemScan.WriteUInt32(heldIndexAddr, unchecked((uint)spoofIndex));
 				}
 			} catch (Exception ex) {
