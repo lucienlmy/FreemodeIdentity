@@ -48,24 +48,36 @@ namespace FreemodeIdentity {
 
 		// Snapshot the live protagonist's worn outfit, bound to their char index. Called at enable while
 		// the player is still the genuine protagonist, before spoofing takes over. Returns false if the
-		// ped is gone or the read faults (the caller logs and leaves nothing to restore).
+		// ped is gone, the read faults, or the capture came back with no apparel — in which case the
+		// PREVIOUS good snapshot is LEFT INTACT rather than replaced with an empty one. This matters after
+		// a hot reload: the fresh instance can see a transitional ped that reads as the protagonist but
+		// whose components aren't loaded yet, and clobbering look.orig.dat with that empty read is what
+		// left the story character in default clothes on the next disable. Only a real capture commits.
 		public bool CaptureFrom(Ped ped, int charIdx) {
 			if (ped == null || !ped.Exists() || charIdx < 0 || charIdx > 2) {
 				return false;
 			}
+			var captured = new AppearanceData();
 			try {
-				PedAppearance.CaptureComponents(ped, look);
-				PedAppearance.CaptureProps(ped, look);
+				PedAppearance.CaptureComponents(ped, captured);
+				PedAppearance.CaptureProps(ped, captured);
 				// Hair too. PedAppearance's ApparelSlots deliberately omits the Hair slot (freemode hair is
 				// head-blend-authored and restored via the appearance system), but a story protagonist's
 				// hair is a plain component the recreate resets, so capture and replay it as one — drawable
 				// + texture is the hairstyle. Stored in the same component list under the Hair slot type.
-				CaptureHair(ped);
-				capturedChar = charIdx;
+				CaptureHair(ped, captured);
 			} catch (Exception e) {
 				Logger.LogError("StoryLook.CaptureFrom: " + e);
 				return false;
 			}
+			// An outfit with no apparel components is a failed/transitional read, not a real "naked"
+			// protagonist — treat it as a miss and keep whatever we had before.
+			if (captured.Components.Count == 0) {
+				return false;
+			}
+			look.Components = captured.Components;
+			look.Props = captured.Props;
+			capturedChar = charIdx;
 			return Save();
 		}
 
@@ -73,10 +85,10 @@ namespace FreemodeIdentity {
 		// texture natives as any component, so appending it to look.Components lets ApplyComponents replay
 		// it with the clothing — no separate apply path. Palette is unused for hair (0).
 		const int HairSlot = 2;
-		void CaptureHair(Ped ped) {
+		static void CaptureHair(Ped ped, AppearanceData into) {
 			int drawable = GTA.Native.Function.Call<int>(GTA.Native.Hash.GET_PED_DRAWABLE_VARIATION, ped, HairSlot);
 			int texture = GTA.Native.Function.Call<int>(GTA.Native.Hash.GET_PED_TEXTURE_VARIATION, ped, HairSlot);
-			look.Components.Add(new ComponentData(HairSlot, drawable, texture, 0));
+			into.Components.Add(new ComponentData(HairSlot, drawable, texture, 0));
 		}
 
 		// Replay the captured outfit onto the returned protagonist — ONLY onto the same character we

@@ -1466,11 +1466,13 @@ namespace FreemodeIdentity {
 			}
 			protagonistSkills.Clear();
 			protagonistSkills.CaptureFromGame(genuineChar);
-			protagonistLook.Clear();
 			// Snapshot their worn outfit too — the return swap recreates them in default clothing, so a
 			// custom look (e.g. set via Menyoo) is otherwise lost. Bound to this char like the others.
+			// NOT Clear()ed first (unlike loadout/skills): CaptureFrom is atomic and keeps the prior good
+			// snapshot if this read comes back empty, so a transitional/hot-reloaded ped can't wipe the
+			// real outfit. A stale cross-char snapshot is still blocked by the char guard on restore.
 			if (!protagonistLook.CaptureFrom(ped, genuineChar)) {
-				Logger.Log("Captured protagonist outfit empty (capture failed) — disable won't restore look.");
+				Logger.Log("Captured protagonist outfit empty (capture failed) — keeping the last good outfit.");
 			}
 		}
 
