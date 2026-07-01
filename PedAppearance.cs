@@ -88,6 +88,10 @@ namespace FreemodeIdentity {
 			if (!hash.Request(5000)) {
 				return false;
 			}
+			// SET_PLAYER_MODEL recreates the player ped, which drops the wanted level (the cops lose their
+			// target and disengage). Capture it now and re-assert it on the new ped so a mod enable/disable
+			// mid-chase doesn't hand the player a free escape.
+			int wanted = Function.Call<int>(Hash.GET_PLAYER_WANTED_LEVEL, Game.Player);
 			Function.Call(Hash.SET_PLAYER_MODEL, Game.Player, hash.Hash);
 			// SET_PLAYER_MODEL destroys the old player ped and creates a new one, so the previous
 			// handle is now invalid. A single frame yield can return before the new ped exists or
@@ -107,6 +111,12 @@ namespace FreemodeIdentity {
 				return false;
 			}
 			Function.Call(Hash.SET_PED_DEFAULT_COMPONENT_VARIATION, ped);
+			// Re-assert the pre-swap wanted level onto the recreated ped. _NOW makes the cops re-engage
+			// immediately instead of waiting for the next search cycle. Skip when there was nothing to keep.
+			if (wanted > 0) {
+				Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, wanted, false);
+				Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
+			}
 			hash.MarkAsNoLongerNeeded();
 			return true;
 		}
