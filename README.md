@@ -134,8 +134,11 @@ that touch the ped (Save / Overwrite / Apply / Edit Mode) are greyed.
 
 Submenus:
 
+Each submenu's on/off toggle is just labelled **Enabled** (the submenu name says which
+feature); this list names them by feature for clarity.
+
 - **Appearance ▸**
-  - **Appearance Enabled** - wear your saved look. On applies the active slot on load and
+  - **Enabled** - wear your saved look. On applies the active slot on load and
     re-applies it after death/respawn/model-swap; off swaps you back to your story character.
   - **Save to New Slot** / **Overwrite Active Slot** / **Apply Active Slot**.
   - **Saved Appearances ▸** - every slot. The active slot is flagged with a coloured `>`:
@@ -150,21 +153,22 @@ Submenus:
   - **Edit Mode** - pauses the re-apply and drops the spoof so an external tool (Menyoo)
     can change the ped freely. Save your look, then turn it off.
 - **Wallet ▸**
-  - **Wallet Enabled** - earn from pickups and route shop charges to the wallet while
+  - **Enabled** - earn from pickups and route shop charges to the wallet while
     spoofing. Off makes the wallet inert.
-  - **Pickups Enabled** - credit collected cash pickups.
+  - **Pickups Enabled** - credit collected cash pickups. Off also stops scanning for them,
+    an escape hatch if you hit FPS trouble in pickup-heavy scenes.
 - **Loadout ▸**
-  - **Loadout Enabled** - keep your weapons, armor and health and restore them with your
+  - **Enabled** - keep your weapons, armor and health and restore them with your
     look. Off stops saving and restoring them.
   - **Weapons**, **Armor**, **Health** (each independently preserved) and **Save Period**
     (how often the carried state is snapshotted).
 - **Skills ▸**
-  - **Skills Enabled** - apply your chosen skill profile while spoofed. **Off by default**
+  - **Enabled** - apply your chosen skill profile while spoofed. **Off by default**
     (an unset profile is all zeros, which would zero a fresh character).
   - One **0-100 setter per skill** (strength, stamina, shooting, stealth, flying, driving,
     lung capacity), in steps of 5. Values save immediately and take effect once spoofed.
 - **Spoofing ▸**
-  - **Spoofing Enabled** - read as a protagonist so shops open and jobs pay out. **On by
+  - **Enabled** - read as a protagonist so shops open and jobs pay out. **On by
     default**, so turning the master on is enough to get the wallet working. It records
     intent and engages once you're a freemode character - safe to leave on as a story
     protagonist (it just won't engage until you're not).
@@ -183,6 +187,8 @@ under the game tree at launch; this location stays writable on both editions):
 - `wallet.dat` - the wallet balance
 - `loadout.dat` - your preserved weapons, armor and health (each line carries a
   readable comment naming the weapon and its attachments)
+- `loadout.orig.dat` / `skills.orig.dat` - your story character's own gear and skills,
+  snapshotted when the mod turns on and restored to them when it turns off
 - `skills.dat` - your chosen skill profile (one `NAME value` line per skill)
 
 ## Config (`FreemodeIdentity.ini`)
@@ -209,7 +215,7 @@ Mood = False              ; True | False  - capture facial mood on Save (brief m
 
 [Wallet]
 Enabled = True            ; True | False  - route shop charges to the wallet while spoofing
-Earning = True            ; True | False  - credit collected cash pickups
+Pickups = True            ; True | False  - credit collected cash pickups (off also stops scanning)
 
 [Penalties]
 Enabled = True            ; True | False  - charge story-mode death/arrest fees to the wallet
