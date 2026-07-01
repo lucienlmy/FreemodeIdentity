@@ -55,6 +55,10 @@ namespace FreemodeIdentity {
 		// survives a restart mid-spoof — the shim's in-memory original does not, which let a reload reset
 		// the protagonist's skills on the next disable.
 		readonly Skills protagonistSkills = new Skills("skills.orig.dat");
+		// The genuine protagonist's own outfit (apparel + props), snapshotted at enable and replayed on
+		// disable — the return SET_PLAYER_MODEL recreates their ped in DEFAULT clothing, so a custom outfit
+		// is otherwise lost. Same enable-edge/disable pattern and safety gates as the two above.
+		readonly StoryLook protagonistLook = new StoryLook();
 		bool skillsEnabled;
 		// Keep flushing the skill-up feed widget until this time, so the shim's restore-to-real write on
 		// unpin (itself a skill change) doesn't leave the widget stuck. Re-armed every frame while pinned.
@@ -339,6 +343,7 @@ namespace FreemodeIdentity {
 			protagonistLoadout.Load();
 			skills.Load();
 			protagonistSkills.Load();
+			protagonistLook.Load();
 			Logger.LogBanner($"Config: edition={GameBuild.Current} master={masterEnabled} appearance={appearanceEnabled} wallet={walletEnabled} pickups={pickupsEnabled} spoof={spoofEnabled} target={spoofTarget} menuKey={menuKey}.");
 
 			XmlAppearanceStorage.Initialize(ScriptPaths.DataDirectory);
@@ -1400,6 +1405,12 @@ namespace FreemodeIdentity {
 			}
 			protagonistSkills.Clear();
 			protagonistSkills.CaptureFromGame(genuineChar);
+			protagonistLook.Clear();
+			// Snapshot their worn outfit too — the return swap recreates them in default clothing, so a
+			// custom look (e.g. set via Menyoo) is otherwise lost. Bound to this char like the others.
+			if (!protagonistLook.CaptureFrom(ped, genuineChar)) {
+				Logger.Log("Captured protagonist outfit empty (capture failed) — disable won't restore look.");
+			}
 		}
 
 		// True from the moment an Appearance toggle starts a model swap until that swap has settled.
@@ -1603,7 +1614,9 @@ namespace FreemodeIdentity {
 				// force: a spoof/stranded hash can make Model.Hash already read as `target`, which
 				// would no-op a non-forced swap and leave the player really freemode. Force a real
 				// SET_PLAYER_MODEL so disable always genuinely returns the story character.
-				bool ok = PedAppearance.SwitchModel(target, force: true);
+				// resetComponents:false — keep the protagonist's own outfit rather than stripping it to
+				// default clothing when we swap back to them.
+				bool ok = PedAppearance.SwitchModel(target, force: true, resetComponents: false);
 				Logger.Log($"Disabled: return to protagonist model={target} -> {(ok ? "OK" : "FAILED")}.");
 				if (ok) {
 					Notify("Disabled - returned to your story character.");
@@ -1627,6 +1640,12 @@ namespace FreemodeIdentity {
 					}
 					if (restoreOriginals && skillsEnabled) {
 						protagonistSkills.RestoreToGame(returnedChar);
+					}
+					// Put their own outfit back — the recreate left them in default clothing. Always on (no
+					// toggle), gated only by the live-spoof and char-match guards, since a correct return
+					// should look like the character you took over. RestoreTo re-checks the char match.
+					if (restoreOriginals && returned != null && returned.Exists()) {
+						protagonistLook.RestoreTo(returned, returnedChar);
 					}
 				} else {
 					Fail("Couldn't return to your story character", "- see the log.");
@@ -2191,7 +2210,7 @@ namespace FreemodeIdentity {
 			// wrong character: scroll to a model and press Enter to genuinely become it (a real
 			// SET_PLAYER_MODEL that bypasses the spoof's hash overlay). Activated fires on Enter.
 			NativeListItem<string> forceItem = new NativeListItem<string>("Force Model", ForceModelLabels);
-			forceItem.Description = "Press Enter to forcibly become the selected model.";
+			forceItem.Description = "Recovery escape hatch - press Enter to forcibly become the selected model. ~y~Comes back with default appearance~s~ - use Disable to return with your own look.";
 			forceItem.Activated += (s, a) => ForceModel(ForceModelNames[forceItem.SelectedIndex]);
 			DebugMenu.Add(forceItem);
 
@@ -2254,6 +2273,10 @@ namespace FreemodeIdentity {
 		// Escape hatch: forcibly become a real model. Releases any held spoof first (its per-tick
 		// re-assert would otherwise re-paint a hash over the new ped), then does a forced real
 		// swap so it lands even when Model.Hash already reads as the target (stranded/spoofed hash).
+		// Deliberately does NOT restore the protagonist's outfit/gear (unlike Disable): this is a raw
+		// recovery tool for a stuck state, it can target a protagonist we never captured, and a
+		// predictable default-appearance result is what you want when un-sticking. Disable is the path
+		// that returns you with your own look.
 		void ForceModel(string model) {
 			if (spoof.Held) {
 				spoof.Stop("force model");

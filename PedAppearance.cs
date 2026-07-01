@@ -65,7 +65,11 @@ namespace FreemodeIdentity {
 		// look would otherwise see "Model.Hash != mp_f_freemode_01" and recreate the ped every time —
 		// and a SET_PLAYER_MODEL recreate also wipes the just-painted appearance, so the next tick
 		// re-applies and recreates again, looping (and leaving a default freemode ped on screen).
-		public static bool SwitchModel(string model, bool force = false, int realModelHash = 0) {
+		// resetComponents: apply default clothing to the recreated ped. True for a freemode apply (the
+		// look paints over a clean base afterward). False when returning to a story protagonist, whose own
+		// outfit StoryLook restores right after — skipping the default set avoids a default-clothes flash
+		// before that lands. (The swap itself brings back nothing but the baked face, hence StoryLook.)
+		public static bool SwitchModel(string model, bool force = false, int realModelHash = 0, bool resetComponents = true) {
 			var hash = new Model(model);
 			if (!hash.IsValid || !hash.IsPed) {
 				return false;
@@ -110,7 +114,9 @@ namespace FreemodeIdentity {
 				hash.MarkAsNoLongerNeeded();
 				return false;
 			}
-			Function.Call(Hash.SET_PED_DEFAULT_COMPONENT_VARIATION, ped);
+			if (resetComponents) {
+				Function.Call(Hash.SET_PED_DEFAULT_COMPONENT_VARIATION, ped);
+			}
 			// Re-assert the pre-swap wanted level onto the recreated ped. _NOW makes the cops re-engage
 			// immediately instead of waiting for the next search cycle. Skip when there was nothing to keep.
 			if (wanted > 0) {

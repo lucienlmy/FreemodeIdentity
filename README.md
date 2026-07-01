@@ -139,7 +139,8 @@ feature); this list names them by feature for clarity.
 
 - **Appearance ▸**
   - **Enabled** - wear your saved look. On applies the active slot on load and
-    re-applies it after death/respawn/model-swap; off swaps you back to your story character.
+    re-applies it after death/respawn/model-swap. Off swaps you back to your story character
+    in their own outfit, hair, gear and skills.
   - **Save to New Slot** / **Overwrite Active Slot** / **Apply Active Slot**.
   - **Saved Appearances ▸** - every slot. The active slot is flagged with a coloured `>`:
     green when it has a backup, yellow when it doesn't. Scroll a slot to pick an action,
@@ -187,8 +188,9 @@ under the game tree at launch; this location stays writable on both editions):
 - `wallet.dat` - the wallet balance
 - `loadout.dat` - your preserved weapons, armor and health (each line carries a
   readable comment naming the weapon and its attachments)
-- `loadout.orig.dat` / `skills.orig.dat` - your story character's own gear and skills,
-  snapshotted when the mod turns on and restored to them when it turns off
+- `loadout.orig.dat` / `skills.orig.dat` / `look.orig.dat` - your story character's own
+  gear, skills and outfit (clothes, props, hair), snapshotted when the mod turns on and
+  restored to them when it turns off
 - `skills.dat` - your chosen skill profile (one `NAME value` line per skill)
 
 ## Config (`FreemodeIdentity.ini`)
@@ -276,6 +278,9 @@ commit builds and publishes a release - the tag is the version source of truth.
   they come out free even with the wallet on. Shops, ATMs and stat-based payouts work.
 - **Overlay tint colours** round-trip shape and opacity but not the palette colour on
   Enhanced yet; **custom moving styles/moods** outside the known tables are left unset.
+- **Story character's hair colour** isn't restored on disable - their outfit, props and
+  hairstyle come back, and the default hair colour returns with the model, but a deliberate
+  recolour isn't preserved.
 
 ## For mod developers
 
