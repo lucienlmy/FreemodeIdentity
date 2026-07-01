@@ -16,7 +16,7 @@ namespace FreemodeIdentity {
 	// frame (see ShimBridge.PushSkills + the shim's stats.cpp). C# owns the chosen profile here and
 	// persists it to a file in the mod's %APPDATA% dir, like the wallet/loadout.
 	internal sealed class Skills {
-		const string StoreFileName = "skills.dat";
+		public const string DefaultStoreFileName = "skills.dat";
 		const int FormatVersion = 1;
 
 		// The seven per-character ability stats, in menu order. Name is the SP{N} stat suffix (also
@@ -43,6 +43,16 @@ namespace FreemodeIdentity {
 		readonly int[] values = new int[Names.Length];
 		string lastSaved; // last text written, to skip an unchanged re-write
 
+		// Per-instance store file so a second Skills (the captured protagonist original) persists to its
+		// own file instead of clobbering the chosen skills.dat.
+		readonly string storeFileName;
+
+		// Defaults to the chosen-profile skills.dat; pass a distinct name (e.g. skills.orig.dat) for a
+		// separate store like the captured protagonist original.
+		public Skills(string storeFileName = DefaultStoreFileName) {
+			this.storeFileName = storeFileName;
+		}
+
 		public int Count => Names.Length;
 		public int Get(int skill) => (skill >= 0 && skill < values.Length) ? values[skill] : 0;
 
@@ -59,7 +69,7 @@ namespace FreemodeIdentity {
 			return (int[])Hashes[charIdx].Clone();
 		}
 
-		static string StorePath => ScriptPaths.For(StoreFileName);
+		string StorePath => ScriptPaths.For(storeFileName);
 
 		// --- Set --------------------------------------------------------------------------
 
@@ -71,6 +81,54 @@ namespace FreemodeIdentity {
 			}
 			values[skill] = Math.Max(0, Math.Min(100, value));
 			Save();
+		}
+
+		// --- Capture / restore the live game stats (for the protagonist-original store) ------
+
+		// Which char index (0/1/2) the stored values were captured from, so a restore can refuse to write
+		// them onto a DIFFERENT character (base swapped mid-spoof). -1 = nothing captured. Persisted.
+		int capturedChar = -1;
+		public bool Captured => capturedChar >= 0;
+
+		// Drop the captured snapshot (and its char binding), so the orig store can't restore a PRIOR
+		// session's skills if this session's capture faults before it lands. Mirrors Loadout.Clear.
+		public void Clear() {
+			for (int i = 0; i < values.Length; i++) {
+				values[i] = 0;
+			}
+			capturedChar = -1;
+		}
+
+		// Snapshot the live protagonist's real skill values straight from the game stats, for the given
+		// char index. Called at enable while the player is still the genuine protagonist, so STAT_GET_INT
+		// returns their true values before the freemode char takes over. Persists so it survives a
+		// restart mid-spoof — the shim's in-memory original does not, which is why a reload could reset
+		// the protagonist's skills on the next disable.
+		public void CaptureFromGame(int charIdx) {
+			if (charIdx < 0 || charIdx > 2) {
+				return;
+			}
+			for (int i = 0; i < Names.Length; i++) {
+				var outArg = new GTA.Native.OutputArgument();
+				GTA.Native.Function.Call<bool>(GTA.Native.Hash.STAT_GET_INT, unchecked((uint)Hashes[charIdx][i]), outArg, -1);
+				int v = outArg.GetResult<int>();
+				values[i] = Math.Max(0, Math.Min(100, v));
+			}
+			capturedChar = charIdx;
+			Save();
+		}
+
+		// Write the captured originals back into the live game stats — ONLY onto the same character we
+		// captured them from. If the caller is returning to a different protagonist (base swapped mid-
+		// spoof), the values don't belong to them, so refuse rather than corrupt their skills.
+		public void RestoreToGame(int charIdx) {
+			if (capturedChar < 0 || charIdx != capturedChar) {
+				return;
+			}
+			for (int i = 0; i < Names.Length; i++) {
+				GTA.Native.Function.Call(GTA.Native.Hash.STAT_SET_INT,
+					unchecked((uint)Hashes[charIdx][i]), values[i], true);
+			}
 		}
 
 		// --- Persistence (never throws; missing = all-zero profile) -------------------------
@@ -92,6 +150,14 @@ namespace FreemodeIdentity {
 					string[] tok = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
 					if (tok.Length == 2 && tok[0].Equals("version", StringComparison.OrdinalIgnoreCase)) {
 						continue; // version line — shape is stable, nothing to act on yet
+					}
+					// The orig store records which char it captured, so a restore can refuse a mismatched
+					// character. Absent on the chosen store (skills.dat), which is char-independent.
+					if (tok.Length == 2 && tok[0].Equals("char", StringComparison.OrdinalIgnoreCase)
+							&& int.TryParse(tok[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int c)
+							&& c >= 0 && c <= 2) {
+						capturedChar = c;
+						continue;
 					}
 					if (tok.Length != 2) {
 						continue;
@@ -125,6 +191,9 @@ namespace FreemodeIdentity {
 		string Serialize() {
 			var sb = new StringBuilder();
 			sb.Append("version ").Append(FormatVersion).Append('\n');
+			if (capturedChar >= 0) {
+				sb.Append("char ").Append(capturedChar).Append('\n');
+			}
 			for (int i = 0; i < values.Length; i++) {
 				sb.Append(Names[i]).Append(' ').Append(values[i]).Append('\n');
 			}

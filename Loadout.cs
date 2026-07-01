@@ -16,7 +16,7 @@ namespace FreemodeIdentity {
 	//
 	// Spending/cash is NOT here — that's the wallet. This is purely the carryables an identity loses.
 	internal sealed class Loadout {
-		const string StoreFileName = "loadout.dat";
+		public const string DefaultStoreFileName = "loadout.dat";
 		// File-format version, written as the first line. Bumped when the line shape changes so a future
 		// format can detect-and-skip an old file cleanly rather than mis-parse it. v2 added per-weapon
 		// component lists; the loader still accepts a v1 file (weapons without components).
@@ -48,12 +48,43 @@ namespace FreemodeIdentity {
 		// at a 1-2s period an unchanged re-write would be pure disk churn. Null until first persisted.
 		string lastSaved;
 
+		// Per-instance store file so a second Loadout (the protagonist's original) persists to its own
+		// file instead of clobbering the primary loadout.dat.
+		readonly string storeFileName;
+
+		// Defaults to the primary loadout.dat; pass a distinct name (e.g. loadout.orig.dat) for a
+		// separate store like the captured protagonist original.
+		public Loadout(string storeFileName = DefaultStoreFileName) {
+			this.storeFileName = storeFileName;
+		}
+
+		// Which protagonist char index (0/1/2) this snapshot was captured from, so the orig store can
+		// refuse to replay onto a DIFFERENT character if the base was swapped mid-spoof (weapons aren't
+		// char-namespaced, so nothing else would catch it). -1 = unbound: the primary char-agnostic
+		// loadout.dat never binds, so its restore passes through. Mirrors Skills' capturedChar guard.
+		int capturedChar = -1;
+
+		// True when this store's snapshot is safe to replay for the given return char: either it's
+		// unbound (primary store, char-agnostic) or it was captured from that same character.
+		public bool MatchesChar(int charIdx) => capturedChar < 0 || capturedChar == charIdx;
+
+		// Drop everything held, so the orig store can't restore a PRIOR session's snapshot if this
+		// session's capture faults before it lands (a persisted .orig.dat outlives a restart). The
+		// capture site clears first, then captures; a fault then restores nothing rather than stale gear.
+		public void Clear() {
+			weapons.Clear();
+			equippedHash = 0;
+			armor = 0;
+			health = 0;
+			capturedChar = -1;
+		}
+
 		public bool HasWeapons => weapons.Count > 0;
 		public int WeaponCount => weapons.Count;
 		public int Armor => armor;
 		public int Health => health;
 
-		static string StorePath => ScriptPaths.For(StoreFileName);
+		string StorePath => ScriptPaths.For(storeFileName);
 
 		// --- Sampling -----------------------------------------------------------------------
 
@@ -62,7 +93,9 @@ namespace FreemodeIdentity {
 		// where the user had it off). Wrapped whole: weapon enumeration touches CPedInventory memory,
 		// so a bad read yields no update rather than faulting the tick. Returns true only when the
 		// snapshot actually changed and was written — so the caller can log a real change, not every tick.
-		public bool CaptureFrom(Ped ped, bool weaponsOn, bool armorOn, bool healthOn) {
+		// charIdx binds the snapshot to a protagonist (orig store) so a later restore can refuse a
+		// mismatched character; leave it -1 (the default) for the primary char-agnostic store.
+		public bool CaptureFrom(Ped ped, bool weaponsOn, bool armorOn, bool healthOn, int charIdx = -1) {
 			if (ped == null || !ped.Exists()) {
 				return false;
 			}
@@ -76,6 +109,7 @@ namespace FreemodeIdentity {
 				if (healthOn) {
 					health = ped.Health;
 				}
+				capturedChar = charIdx;
 			} catch (Exception e) {
 				Logger.LogError("Loadout.CaptureFrom: " + e);
 				return false;
@@ -223,6 +257,14 @@ namespace FreemodeIdentity {
 							// (v1 weapon lines simply carry no component tokens), so the tag is for future
 							// format jumps that need to detect-and-skip rather than for branching today.
 							break;
+						case "char":
+							// The captured protagonist index; only the orig store writes it. Out-of-range or
+							// missing leaves capturedChar at -1 (unbound), which the restore treats as no guard.
+							if (!(f.Length > 1 && int.TryParse(f[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out capturedChar)
+									&& capturedChar >= 0 && capturedChar <= 2)) {
+								capturedChar = -1;
+							}
+							break;
 						case "armor":
 							int.TryParse(f.Length > 1 ? f[1] : "0", NumberStyles.Integer, CultureInfo.InvariantCulture, out armor);
 							break;
@@ -288,6 +330,11 @@ namespace FreemodeIdentity {
 		string Serialize() {
 			var sb = new StringBuilder();
 			sb.Append("version ").Append(FormatVersion.ToString(CultureInfo.InvariantCulture)).Append('\n');
+			// The orig store records which protagonist it captured so a restore can refuse a mismatched
+			// character; absent on the primary char-agnostic store (capturedChar stays -1).
+			if (capturedChar >= 0) {
+				sb.Append("char ").Append(capturedChar.ToString(CultureInfo.InvariantCulture)).Append('\n');
+			}
 			sb.Append("armor ").Append(armor.ToString(CultureInfo.InvariantCulture)).Append('\n');
 			sb.Append("health ").Append(health.ToString(CultureInfo.InvariantCulture)).Append('\n');
 			sb.Append("equipped ").Append(equippedHash.ToString(CultureInfo.InvariantCulture)).Append('\n');

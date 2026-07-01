@@ -42,9 +42,19 @@ namespace FreemodeIdentity {
 
 		// --- Loadout (weapons/armor/health a freemode ped loses) --------------------------
 		readonly Loadout loadout = new Loadout();
+		// The genuine protagonist's own loadout, snapshotted at enable and replayed on disable so
+		// returning to them restores THEIR gear (the freemode char's lives in `loadout`). Persisted to
+		// its OWN file so it survives a restart mid-spoof — never sampled per-tick, only captured on the
+		// enable edge and consumed on disable.
+		readonly Loadout protagonistLoadout = new Loadout("loadout.orig.dat");
 
 		// --- Skills (a user-set skill profile; they don't progress on their own) ----------
 		readonly Skills skills = new Skills();
+		// The genuine protagonist's real skills, snapshotted at enable and written back on disable so
+		// returning to them restores THEIR values authoritatively. Persisted to its own file so it
+		// survives a restart mid-spoof — the shim's in-memory original does not, which let a reload reset
+		// the protagonist's skills on the next disable.
+		readonly Skills protagonistSkills = new Skills("skills.orig.dat");
 		bool skillsEnabled;
 		// Keep flushing the skill-up feed widget until this time, so the shim's restore-to-real write on
 		// unpin (itself a skill change) doesn't leave the widget stuck. Re-armed every frame while pinned.
@@ -326,7 +336,9 @@ namespace FreemodeIdentity {
 			pickups = new Pickups(wallet);
 			wallet.Load();
 			loadout.Load();
+			protagonistLoadout.Load();
 			skills.Load();
+			protagonistSkills.Load();
 			Logger.LogBanner($"Config: edition={GameBuild.Current} master={masterEnabled} appearance={appearanceEnabled} wallet={walletEnabled} pickups={pickupsEnabled} spoof={spoofEnabled} target={spoofTarget} menuKey={menuKey}.");
 
 			XmlAppearanceStorage.Initialize(ScriptPaths.DataDirectory);
@@ -1362,12 +1374,32 @@ namespace FreemodeIdentity {
 		// reading is OURS, not real, and PlayerIdentity sees through it from the live body).
 		void RememberSourceIfProtagonist() {
 			if (!string.IsNullOrEmpty(SourceModel)) return;
-			string genuine = PlayerIdentity.GenuineProtagonist(Game.Player?.Character, spoof);
+			Ped ped = Game.Player?.Character;
+			string genuine = PlayerIdentity.GenuineProtagonist(ped, spoof);
 			if (genuine == null) return;
 			SourceModel = Identity.ModelName(genuine);
 			Config.SetValue("State", "SourceModel", SourceModel);
 			Config.Save();
 			Logger.Log($"Captured source protagonist model={SourceModel}.");
+			// Snapshot the protagonist's OWN loadout AND real skills the same moment we capture their
+			// model — the last tick they're the live genuine protagonist before the freemode char takes
+			// over. Disable replays both so returning to them restores THEIR gear and skills, not the
+			// freemode char's. Both persist to their own files so a restart mid-spoof can still restore.
+			//
+			// Clear each orig store BEFORE capturing: a persisted .orig.dat outlives a restart, so if this
+			// capture faults we must not leave a prior session's snapshot restorable. Clear-then-capture
+			// means a fault restores nothing rather than stale gear/skills.
+			int genuineChar = Identity.CharIndex(genuine);
+			protagonistLoadout.Clear();
+			// After a Clear the snapshot is empty, so a real capture always changes it: a false return
+			// here means the ped was gone or the read faulted, not an unchanged sample. Log it — the
+			// store stays empty (restores nothing) rather than silently reusing a prior session's gear.
+			// Bind the capture to this protagonist so a restore onto a different one is refused.
+			if (!protagonistLoadout.CaptureFrom(ped, loadoutWeapons, loadoutArmor, loadoutHealth, genuineChar)) {
+				Logger.Log("Captured protagonist loadout empty (capture failed) — disable won't restore gear.");
+			}
+			protagonistSkills.Clear();
+			protagonistSkills.CaptureFromGame(genuineChar);
 		}
 
 		// True from the moment an Appearance toggle starts a model swap until that swap has settled.
@@ -1558,6 +1590,13 @@ namespace FreemodeIdentity {
 		// identity we were impersonating (passed in from SetEnabled, captured before the spoof was
 		// stopped), else the configured ReturnProtagonist.
 		void ReturnToSourceProtagonist(string spoofedIdentity = null) {
+			// Whether we're returning to the SAME protagonist we captured this spoof session. The
+			// captured original is only a safe thing to write back if we're genuinely undoing the spoof
+			// we took over — a live SourceModel means we're mid-session and the returned character is the
+			// one we snapshotted. If SourceModel is empty (not actively spoofing) the persisted original
+			// is stale: the user may have played the protagonist and changed their real stats since, so
+			// writing our old snapshot back would clobber the newer real values. Skip the restore then.
+			bool restoreOriginals = !string.IsNullOrEmpty(SourceModel);
 			string target = !string.IsNullOrEmpty(SourceModel) ? SourceModel
 				: Identity.ModelName(spoofedIdentity) ?? ReturnProtagonist;
 			try {
@@ -1568,6 +1607,27 @@ namespace FreemodeIdentity {
 				Logger.Log($"Disabled: return to protagonist model={target} -> {(ok ? "OK" : "FAILED")}.");
 				if (ok) {
 					Notify("Disabled - returned to your story character.");
+					// The swap recreates the protagonist ped BARE and the shim's skill unpin can be lost
+					// on a reload, so restore the PROTAGONIST'S OWN gear and skills we captured at enable —
+					// never the freemode char's (those are separate stores), and only when this is a live
+					// spoof session (restoreOriginals) so we never write a stale snapshot over newer real
+					// stats. Read who we actually became so the skill restore targets the right char index.
+					// Gated on each feature's intent, not the *Active flags (the master is off on this path).
+					// Which protagonist we actually returned to — both restores refuse a mismatch, so a
+					// snapshot captured from a DIFFERENT character (base swapped mid-spoof, or a snapshot
+					// left over from another save) is never written onto this one.
+					int returnedChar = Identity.CharIndex(Identity.Current());
+					Ped returned = Game.Player?.Character;
+					if (restoreOriginals && loadoutEnabled && protagonistLoadout.MatchesChar(returnedChar)
+							&& returned != null && returned.Exists()) {
+						// HasWeapons gates only the weapon replay — a protagonist captured carrying nothing
+						// (fists only) still has armor/health to put back.
+						if (loadoutWeapons && protagonistLoadout.HasWeapons) protagonistLoadout.RestoreWeapons(returned);
+						protagonistLoadout.RestoreVitals(returned, loadoutArmor, loadoutHealth);
+					}
+					if (restoreOriginals && skillsEnabled) {
+						protagonistSkills.RestoreToGame(returnedChar);
+					}
 				} else {
 					Fail("Couldn't return to your story character", "- see the log.");
 				}
