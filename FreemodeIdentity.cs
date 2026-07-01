@@ -320,6 +320,17 @@ namespace FreemodeIdentity {
 		// Game-time ms of the last loadout sample, so OnTick samples on the period rather than every
 		// frame. -1 = never sampled.
 		int lastLoadoutSampleMs = -1;
+		// Game-time ms a re-grant watch was armed (by a restore), or -1 when idle. A model-swap recreate
+		// leaves the ped bare, then the game re-grants its prior MP weapon inventory — coupled to our own
+		// restore, not a fixed delay (proven by an ammo probe). So rather than guess a wait, the sampler
+		// re-asserts the stored loadout until the ped stops diverging from the store, then resumes. This
+		// timestamp only bounds that watch so a genuinely unstorable weapon can't wedge it (the "emptied
+		// weapons come back after disable/enable" bug).
+		int loadoutRestoredAtMs = -1;
+		// Safety cap on the re-grant watch: normally it ends the moment the ped matches the store (event
+		// driven), but if that never happens — an odd weapon the store can't hold — give up and resume
+		// sampling rather than re-assert forever.
+		const int LoadoutRegrantWatchMaxMs = 5000;
 		// The selectable sampling periods (ms), shown as the labels below. One shared timer covers
 		// every loadout group.
 		static readonly int[] LoadoutPeriodsMs = { 1000, 2000, 5000, 10000, 30000, 60000 };
@@ -1036,6 +1047,7 @@ namespace FreemodeIdentity {
 				loadoutVitalsRestored = true;
 			}
 			loadoutRestoredOnce = true;
+			loadoutRestoredAtMs = Game.GameTime; // arm the re-grant watch (see loadoutRestoredAtMs)
 			Logger.LogDebug($"Loadout restored (weapons={loadoutWeapons} vitals={includeVitals} hasWeapons={loadout.HasWeapons}).");
 		}
 
@@ -1070,6 +1082,23 @@ namespace FreemodeIdentity {
 			// first sample on a warm load reads the bare just-loaded body and clobbers the store.
 			if (!loadoutRestoredOnce) {
 				return;
+			}
+			// Re-grant watch (event-driven): after a restore the game re-grants the recreated ped its prior
+			// weapon inventory, coupled to the restore rather than a fixed delay. While the ped still carries
+			// weapons the store doesn't (a re-grant), re-assert the stored loadout instead of sampling — so
+			// an emptied loadout stays empty on the ped, not just in the store. Stop watching the moment the
+			// ped matches the store, or when the safety cap expires (an unstorable weapon that never clears).
+			if (loadoutRestoredAtMs >= 0) {
+				Ped settled = Game.Player?.Character;
+				bool capExpired = Game.GameTime - loadoutRestoredAtMs >= LoadoutRegrantWatchMaxMs;
+				if (settled != null && settled.Exists() && PlayerIdentity.IsFreemodeBody(settled)
+						&& !loadout.MatchesLive(settled) && !capExpired) {
+					if (loadoutWeapons) {
+						loadout.RestoreWeapons(settled);
+					}
+					return; // still diverging — hold sampling, re-check next tick
+				}
+				loadoutRestoredAtMs = -1; // matched (or gave up) — resume normal sampling
 			}
 			if (lastLoadoutSampleMs >= 0 && Game.GameTime - lastLoadoutSampleMs < loadoutSavePeriodMs) {
 				return;

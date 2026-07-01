@@ -84,6 +84,30 @@ namespace FreemodeIdentity {
 		public int Armor => armor;
 		public int Health => health;
 
+		// True when the live ped carries nothing beyond what the store holds — i.e. the game hasn't
+		// re-granted a weapon the store doesn't have. After a restore this is the "settled" signal: while
+		// false, a re-grant is still pending (re-assert instead of sampling); once true, sampling is safe.
+		// Unarmed is ignored (it's never a stored inventory item). No-fault: a bad read reports settled so
+		// a transient can't wedge the caller in a re-assert loop.
+		public bool MatchesLive(Ped ped) {
+			if (ped == null || !ped.Exists()) {
+				return true;
+			}
+			try {
+				foreach (WeaponHash wh in ped.Weapons.GetAllWeaponHashes()) {
+					if (wh == WeaponHash.Unarmed) {
+						continue;
+					}
+					if (!weapons.Exists(w => w.Hash == (uint)wh)) {
+						return false; // a weapon on the ped that the store doesn't have — a re-grant
+					}
+				}
+			} catch {
+				return true;
+			}
+			return true;
+		}
+
 		string StorePath => ScriptPaths.For(storeFileName);
 
 		// --- Sampling -----------------------------------------------------------------------
@@ -176,13 +200,17 @@ namespace FreemodeIdentity {
 
 		// --- Restore ------------------------------------------------------------------------
 
-		// Replay weapons onto a (freshly-recreated, weaponless) ped. equipNow is false on the gives so
-		// they don't fight each other — the final select decides what's in hand.
+		// Make the ped's weapons match the store exactly: strip everything, then give back what's stored.
+		// Stripping first is what lets an intentional empty stick — the game re-grants a recreated MP ped
+		// its old inventory, so an additive restore of an empty store would leave that arsenal in place.
+		// equipNow is false on the gives so they don't fight each other — the final select decides what's
+		// in hand.
 		public void RestoreWeapons(Ped ped) {
-			if (ped == null || !ped.Exists() || weapons.Count == 0) {
+			if (ped == null || !ped.Exists()) {
 				return;
 			}
 			try {
+				Function.Call(Hash.REMOVE_ALL_PED_WEAPONS, ped, false);
 				foreach (WeaponState w in weapons) {
 					Function.Call(Hash.GIVE_WEAPON_TO_PED, ped, w.Hash, w.Ammo, false, false);
 					// Fit the saved attachments before tint, so a livery/camo part is present when its
