@@ -32,7 +32,7 @@ namespace FreemodeIdentity {
 		// The climb curve, dialled by a SPEED multiplier the user picks in the menu: 1.0 = the default
 		// pace, 2.0 = twice as fast, 0.5 = half. Speed scales the whole curve (bigger = fewer XP per level
 		// = faster). Base is picked so a full 0→100 on one skill is a solid chunk of active play at 1.0.
-		const float BaseXpPerLevel = 300f;
+		const float BaseXpPerLevel = 200f; // 1.5x faster than the original 300 baseline, at every speed
 		public const float DefaultSpeed = 1.0f;
 		public const float MinSpeed = 0.1f, MaxSpeed = 32f; // clamp a hand-edited value sane (32x = the top preset)
 		float speed = DefaultSpeed;
@@ -49,11 +49,10 @@ namespace FreemodeIdentity {
 
 		public SkillProgress(int skillCount) {
 			count = skillCount;
+			// Default every skill PROGRESSING (locked defaults to all-false): skills start at 0, so a fresh
+			// install should climb from there the moment Skills is enabled rather than sit frozen at zero.
 			locked = new bool[count];
 			xp = new float[count];
-			// Default every skill HALTED: an install that flips Skills on expects the values it set to
-			// hold, not to start drifting upward unasked. Progressing is an explicit per-skill opt-in.
-			for (int i = 0; i < count; i++) locked[i] = true;
 		}
 
 		public bool IsLocked(int skill) => InRange(skill) && locked[skill];
