@@ -111,7 +111,7 @@ bike or swim) builds Stamina, swimming underwater builds Lung, firing or aiming 
 Shooting, meleeing builds Strength, moving in stealth builds Stealth, and driving or flying
 build Driving/Flying. Easy effort (a jog, an easy pedal, a drift) earns less than full
 effort. Growth is **not linear** - like the real game it slows as a skill rises, so the last
-levels are a grind. A **Progression Speed** setting (0.25x to 4x) scales the whole climb. The
+levels are a grind. A **Progression Speed** setting (0.25x to 32x) scales the whole climb. The
 value in the menu *is* the progression - it climbs there directly - and you can set a skill by
 hand at any time to continue from a new number. Press **Enter** on a skill to flip it between
 halted and progressing.
@@ -185,7 +185,7 @@ feature); this list names them by feature for clarity.
     you play), **yellow** when it's halted (held at its value). Scroll to set the value,
     press **Enter** to flip progressing/halted. Values save immediately and take effect once
     spoofed.
-  - **Progression Speed** - how fast progressing skills climb (0.25x to 4x); halted skills
+  - **Progression Speed** - how fast progressing skills climb (0.25x to 32x); halted skills
     are unaffected.
 - **Spoofing ▸**
   - **Enabled** - read as a protagonist so shops open and jobs pay out. **On by
@@ -255,7 +255,7 @@ SavePeriodSeconds = 2     ; 1 | 2 | 5 | 10 | 30 | 60  - how often the loadout is
 
 [Skills]
 Enabled = False              ; True | False  - run skills (set + progression) while spoofed
-ProgressSpeedPercent = 100   ; 25 | 50 | 100 | 200 | 400  - climb speed for progressing skills (100 = 1x)
+ProgressSpeedPercent = 100   ; 25 | 50 | 100 | 200 | 400 | 800 | 1600 | 3200  - climb speed for progressing skills (100 = 1x)
                              ; (values + per-skill halt/progress live in skills.dat / skillxp.dat, set via the menu)
 
 [Spoof]

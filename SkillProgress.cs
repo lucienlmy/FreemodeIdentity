@@ -34,7 +34,7 @@ namespace FreemodeIdentity {
 		// = faster). Base is picked so a full 0→100 on one skill is a solid chunk of active play at 1.0.
 		const float BaseXpPerLevel = 300f;
 		public const float DefaultSpeed = 1.0f;
-		public const float MinSpeed = 0.1f, MaxSpeed = 10f; // clamp a hand-edited value sane
+		public const float MinSpeed = 0.1f, MaxSpeed = 32f; // clamp a hand-edited value sane (32x = the top preset)
 		float speed = DefaultSpeed;
 
 		// GTA's real skills are NOT linear — they slow down as they rise (the first half comes quickly, the

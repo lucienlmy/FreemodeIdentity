@@ -181,6 +181,26 @@ namespace FreemodeIdentity {
 		static void Fail(string tag, string detail) => GTA.UI.Notification.PostTicker($"~r~{tag}~s~ {detail}", false);
 		static void NotifyBusy() => Notify("Snapshot still saving - try again in a moment.");
 
+		// -1 = not yet primed, so the first call after load adopts the balance silently instead of
+		// tickering the whole loaded amount as if it just arrived.
+		int lastNotifiedBalance = -1;
+
+		// Ticker a wallet change (green +$ income, red -$ spend) and the new balance, from wherever the
+		// money moved. Primes silently on the first call and after a deliberate ack.
+		void NotifyBalanceChange() {
+			int balance = wallet.Balance;
+			if (lastNotifiedBalance < 0) { lastNotifiedBalance = balance; return; }
+			int delta = balance - lastNotifiedBalance;
+			if (delta == 0) return;
+			lastNotifiedBalance = balance;
+			string sign = delta < 0 ? $"~r~-${-delta}" : $"~g~+${delta}";
+			Notify($"{sign}~s~  ·  ~g~${balance}~s~");
+		}
+
+		// Adopt the current balance as the baseline without a ticker — for changes that post their own
+		// (penalties), so the generic notifier doesn't double up on the same money movement.
+		void AckBalance() => lastNotifiedBalance = wallet.Balance;
+
 		// The slot auto-applied on load while appearance is enabled. "" means none chosen.
 		string ActiveSlot;
 
@@ -922,6 +942,11 @@ namespace FreemodeIdentity {
 
 				SyncShim();
 
+				// Ticker any wallet change from one place — covers pickups, job payouts and shop charges alike,
+				// and runs even with no shim installed (pickups still earn). Penalties ack their own change so
+				// their descriptive ticker isn't doubled.
+				NotifyBalanceChange();
+
 				// Sample the carryables a freemode ped loses (weapons/armor/health) on the shared
 				// period so the persisted snapshot tracks what the player is actually carrying.
 				SampleLoadout();
@@ -1181,6 +1206,7 @@ namespace FreemodeIdentity {
 			int fee = FeeFor(penaltyDeathCap);
 			if (fee <= 0) return;
 			wallet.Apply(-fee);
+			AckBalance(); // this posts its own ticker below — keep the generic one from doubling it
 			Logger.Log($"Penalty: death healthcare fee ${fee} -> wallet ${wallet.Balance}.");
 			Notify($"Healthcare fee ~r~-${fee}~s~");
 		}
@@ -1189,6 +1215,7 @@ namespace FreemodeIdentity {
 			int fee = FeeFor(penaltyBustCap);
 			if (fee <= 0) return;
 			wallet.Apply(-fee);
+			AckBalance(); // this posts its own ticker below — keep the generic one from doubling it
 			Logger.Log($"Penalty: arrest bail fine ${fee} -> wallet ${wallet.Balance}.");
 			Notify($"Bail fine ~r~-${fee}~s~");
 		}
@@ -2388,8 +2415,8 @@ namespace FreemodeIdentity {
 
 		// Progression speed presets - the multiplier the user picks, 1x = default pace. Stored as
 		// percent ints so the ini stays integer-clean; the labels are the plain multipliers.
-		static readonly int[] SkillSpeedPercents = { 25, 50, 100, 200, 400 };
-		static readonly string[] SkillSpeedLabels = { "0.25x", "0.5x", "1x", "2x", "4x" };
+		static readonly int[] SkillSpeedPercents = { 25, 50, 100, 200, 400, 800, 1600, 3200 };
+		static readonly string[] SkillSpeedLabels = { "0.25x", "0.5x", "1x", "2x", "4x", "8x", "16x", "32x" };
 
 		void BuildSkillsMenu() {
 			SkillsMenu = new NativeMenu("Skills", "Skills");
