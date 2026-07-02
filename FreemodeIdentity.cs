@@ -193,8 +193,7 @@ namespace FreemodeIdentity {
 			int delta = balance - lastNotifiedBalance;
 			if (delta == 0) return;
 			lastNotifiedBalance = balance;
-			string sign = delta < 0 ? $"~r~-${-delta}" : $"~g~+${delta}";
-			Notify($"{sign}~s~  ·  ~g~${balance}~s~");
+			Notify(delta < 0 ? $"~r~-${-delta}~s~" : $"~g~+${delta}~s~");
 		}
 
 		// Adopt the current balance as the baseline without a ticker — for changes that post their own
