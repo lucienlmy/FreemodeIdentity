@@ -2433,8 +2433,8 @@ namespace FreemodeIdentity {
 
 		// Progression speed presets - the multiplier the user picks, 1x = default pace. Stored as
 		// percent ints so the ini stays integer-clean; the labels are the plain multipliers.
-		static readonly int[] SkillSpeedPercents = { 25, 50, 75, 100, 150, 200, 400, 800, 1600, 3200 };
-		static readonly string[] SkillSpeedLabels = { "0.25x", "0.5x", "0.75x", "1x", "1.5x", "2x", "4x", "8x", "16x", "32x" };
+		static readonly int[] SkillSpeedPercents = { 25, 50, 75, 100, 125, 150, 200, 300, 500, 1000, 2000, 4000 };
+		static readonly string[] SkillSpeedLabels = { "0.25x", "0.5x", "0.75x", "1x", "1.25x", "1.5x", "2x", "3x", "5x", "10x", "20x", "40x" };
 
 		void BuildSkillsMenu() {
 			SkillsMenu = new NativeMenu("Skills", "Skills");
