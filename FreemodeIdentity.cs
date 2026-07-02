@@ -73,6 +73,9 @@ namespace FreemodeIdentity {
 		// unpin (itself a skill change) doesn't leave the widget stuck. Re-armed every frame while pinned.
 		int skillFlushUntilMs = -1;
 		const int SkillFlushTrailMs = 1500;
+		// Feed ids to sweep past our own newest when clearing the skill banner (see SweepSkillWidget) —
+		// wide enough to catch its re-posts, small enough to stay cheap.
+		const int SkillWidgetSweepSpan = 8;
 		// Progression activity watcher: throttled so it costs a handful of cheap natives a few times a
 		// second, not every frame (heed the per-frame-cost work — no memory walks here). We award XP as
 		// XP-per-second scaled by the real elapsed time since the last sample, so the climb rate is
@@ -176,9 +179,26 @@ namespace FreemodeIdentity {
 		// ~r~ = something failed. Warn/Fail colour only a short leading TAG then ~s~ back to plain,
 		// so the emphasis lands on the headline, not the whole line. The single "busy" message is
 		// shared so the several "snapshot still saving" call sites can't drift apart.
-		static void Notify(string message) => GTA.UI.Notification.PostTicker(message, false);
-		static void Warn(string tag, string detail) => GTA.UI.Notification.PostTicker($"~y~{tag}~s~ {detail}", false);
-		static void Fail(string tag, string detail) => GTA.UI.Notification.PostTicker($"~r~{tag}~s~ {detail}", false);
+		static void Notify(string message) => TrackFeedPost(GTA.UI.Notification.PostTicker(message, false));
+		static void Warn(string tag, string detail) => TrackFeedPost(GTA.UI.Notification.PostTicker($"~y~{tag}~s~ {detail}", false));
+		static void Fail(string tag, string detail) => TrackFeedPost(GTA.UI.Notification.PostTicker($"~r~{tag}~s~ {detail}", false));
+
+		// Track the highest feed id we've posted, so SweepSkillWidget can tell our own tickers (at or below
+		// it) from the game's skill-up banner (posted just above it) and only remove the latter.
+		static int highestOwnFeedId = -1;
+		static void TrackFeedPost(FeedPost post) {
+			if (post.Handle > highestOwnFeedId) highestOwnFeedId = post.Handle;
+		}
+
+		// Clear the game's re-posted skill-up banner without a full-queue flush (which was eating our wallet
+		// tickers). Feed ids rise monotonically, so the banner sits just above our newest ticker: sweeping
+		// the span past highestOwnFeedId hits it and spares ours. REMOVE_ITEM on a dead id is a no-op.
+		static void SweepSkillWidget() {
+			int from = highestOwnFeedId + 1;
+			for (int id = from; id < from + SkillWidgetSweepSpan; id++) {
+				GTA.Native.Function.Call(GTA.Native.Hash.THEFEED_REMOVE_ITEM, id);
+			}
+		}
 		static void NotifyBusy() => Notify("Snapshot still saving - try again in a moment.");
 
 		// -1 = not yet primed, so the first call after load adopts the balance silently instead of
@@ -655,10 +675,10 @@ namespace FreemodeIdentity {
 				// menu tail live so the config screen still refreshes. `appearanceSwitching` keeps the
 				// block running through the disable swap itself so it can complete.
 				if (!masterEnabled && !appearanceSwitching) {
-					// Finish flushing the skill-up widget the disable's unpin re-posts (SetMasterEnabled
+					// Finish clearing the skill-up widget the disable's unpin re-posts (SetMasterEnabled
 					// armed the trail) — it outlives this skip so the "Stamina +" banner clears.
 					if (Game.GameTime < skillFlushUntilMs) {
-						GTA.Native.Function.Call(GTA.Native.Hash.THEFEED_FLUSH_QUEUE);
+						SweepSkillWidget();
 					}
 					if (AnyMenuVisible()) {
 						SyncSpoofItem();
@@ -1073,15 +1093,14 @@ namespace FreemodeIdentity {
 			// Our memory write makes a skill value differ from the protagonist's saved profile, which
 			// stats_controller.ysc treats as a skill-up and posts a sticky THEFEED stats widget (the
 			// "Stamina + 100/100" portrait bar). It's not a HUD_COMPONENT and survives THEFEED_PAUSE, so
-			// the only lever is flushing the feed queue — and it must be continuous while pinned, since
-			// the script re-posts it. Scoped to pinned so normal toasts are untouched otherwise. Keep
-			// flushing for a short window AFTER unpinning too: the shim's restore-to-real write is itself
+			// the item has to be removed — continuously while pinned, since the script re-posts it. Keep
+			// removing for a short window AFTER unpinning too: the shim's restore-to-real write is itself
 			// a skill change that re-posts the widget, so a hard cut-off would leave it stuck on disable.
 			if (pinSkills) {
 				skillFlushUntilMs = Game.GameTime + SkillFlushTrailMs;
 			}
 			if (Game.GameTime < skillFlushUntilMs) {
-				GTA.Native.Function.Call(GTA.Native.Hash.THEFEED_FLUSH_QUEUE);
+				SweepSkillWidget();
 			}
 
 			// Simulated progression: award XP to FREE skills from watched activity, but ONLY while we're
