@@ -255,7 +255,7 @@ SavePeriodSeconds = 2     ; 1 | 2 | 5 | 10 | 30 | 60  - how often the loadout is
 
 [Skills]
 Enabled = False              ; True | False  - run skills (set + progression) while spoofed
-ProgressSpeedPercent = 100   ; 25 | 50 | 100 | 200 | 400 | 800 | 1600 | 3200  - climb speed for progressing skills (100 = 1x)
+ProgressSpeedPercent = 100   ; 25 | 50 | 75 | 100 | 150 | 200 | 400 | 800 | 1600 | 3200  - climb speed for progressing skills (100 = 1x)
                              ; (values + per-skill halt/progress live in skills.dat / skillxp.dat, set via the menu)
 
 [Spoof]

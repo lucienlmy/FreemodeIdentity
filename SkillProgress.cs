@@ -32,7 +32,7 @@ namespace FreemodeIdentity {
 		// The climb curve, dialled by a SPEED multiplier the user picks in the menu: 1.0 = the default
 		// pace, 2.0 = twice as fast, 0.5 = half. Speed scales the whole curve (bigger = fewer XP per level
 		// = faster). Base is picked so a full 0→100 on one skill is a solid chunk of active play at 1.0.
-		const float BaseXpPerLevel = 200f; // 1.5x faster than the original 300 baseline, at every speed
+		const float BaseXpPerLevel = 300f; // XP for one level at 1x speed; picks the default pace
 		public const float DefaultSpeed = 1.0f;
 		public const float MinSpeed = 0.1f, MaxSpeed = 32f; // clamp a hand-edited value sane (32x = the top preset)
 		float speed = DefaultSpeed;
