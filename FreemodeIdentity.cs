@@ -464,9 +464,10 @@ namespace FreemodeIdentity {
 			int periodSec = Config.GetValue("Loadout", "SavePeriodSeconds", 2);
 			loadoutSavePeriodMs = NearestLoadoutPeriodMs(periodSec * 1000);
 
-			// Default OFF: an untouched profile is all-zeros, so applying it on a fresh install would force
-			// skills to 0 — worse than leaving them. Only enforce once the user opts in with the toggle.
-			skillsEnabled = Config.GetValue("Skills", "Enabled", false);
+			// Default ON with the rest of the features. An untouched profile is all-zeros, so the first
+			// enable on a fresh install forces skills to 0 until the user sets values in the menu — the
+			// price of on-by-default; a returned story protagonist still gets their real skills back.
+			skillsEnabled = Config.GetValue("Skills", "Enabled", true);
 			// Progression speed multiplier: 1.0 = default pace, 2.0 = twice as fast, 0.5 = half. Stored as
 			// a percent int in the ini (100 = 1.0×) so the config stays integer-clean; the menu writes it
 			// back when the user picks a preset. Clamped sane so a typo can't stall or instantly-max a skill.

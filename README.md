@@ -178,8 +178,8 @@ feature); this list names them by feature for clarity.
   - **Weapons**, **Armor**, **Health** (each independently preserved) and **Save Period**
     (how often the carried state is snapshotted).
 - **Skills ▸**
-  - **Enabled** - run skills while spoofed. **Off by default** (an unset profile is all
-    zeros, which would zero a fresh character).
+  - **Enabled** - run skills while spoofed. **On by default**; note that an unset profile is
+    all zeros, so set your skill values before the first spoof or they apply as 0.
   - One **0-100 setter per skill** (stamina, shooting, strength, stealth, flying, driving,
     lung capacity). Each carries a coloured `>`: **green** when it's progressing (climbs as
     you play), **yellow** when it's halted (held at its value). Scroll to set the value,
@@ -254,7 +254,7 @@ Health = True             ; True | False  - preserve health
 SavePeriodSeconds = 2     ; 1 | 2 | 5 | 10 | 30 | 60  - how often the loadout is snapshotted
 
 [Skills]
-Enabled = False              ; True | False  - run skills (set + progression) while spoofed
+Enabled = True               ; True | False  - run skills (set + progression) while spoofed
 ProgressSpeedPercent = 100   ; 25 | 50 | 75 | 100 | 125 | 150 | 200 | 300 | 500 | 1000 | 2000 | 4000  - climb speed for progressing skills (100 = 1x)
                              ; (values + per-skill halt/progress live in skills.dat / skillxp.dat, set via the menu)
 
