@@ -54,6 +54,18 @@ namespace FreemodeIdentity {
 
 		public bool Available => state != IntPtr.Zero;
 
+		// Re-validate an already-connected block so a shim that went bad (unreadable or a changed
+		// version — a corruption/crash) drops the connection here instead of faulting the raw Marshal
+		// writes in Push*. Cheap (one VirtualQuery). On failure, zero `state` so the caller re-detects.
+		public bool StillLive() {
+			if (state == IntPtr.Zero) return false;
+			if (MemScan.IsReadable(state, StateSize) && Marshal.ReadInt32(state, OffVersion) == ExpectedVersion) {
+				return true;
+			}
+			state = IntPtr.Zero;
+			return false;
+		}
+
 		// Log a connect failure ONCE per distinct reason (TryConnect runs every tick, so the
 		// shim being absent must not spam the log). A new reason supersedes the old.
 		bool Fail(string reason) {

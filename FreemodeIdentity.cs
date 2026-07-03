@@ -352,6 +352,12 @@ namespace FreemodeIdentity {
 
 		bool redirectLogged; // last-logged redirect state, to edge-trigger the transition log
 
+		// True once the on-screen "shim not loaded" warning has fired, so it doesn't repeat every tick;
+		// re-armed on reconnect so each disconnection episode warns once. The grace period covers the
+		// first ticks, where the .asi (loaded by ScriptHookV) legitimately isn't resolved yet.
+		bool shimMissingWarned;
+		const int ShimConnectGraceMs = 8000;
+
 		// --- Loadout config ---------------------------------------------------------------
 		// Master + per-item toggles for the weapons/armor/health a freemode ped loses (the game
 		// doesn't save them, and our model-swap recreates the ped bare). Master off = no sampling,
@@ -1026,9 +1032,19 @@ namespace FreemodeIdentity {
 		// we're spoofed to a protagonist. The shim reports money events back as a signed
 		// pendingDelta it accumulates; we apply + zero it, then push the authoritative balance.
 		void SyncShim() {
-			if (!shim.TryConnect()) {
+			// TryConnect covers the not-installed / not-yet-loaded case; StillLive guards the writes below
+			// against a connected block that later went bad. Either failing warns and skips this tick.
+			if (!shim.TryConnect() || !shim.StillLive()) {
+				// Warn once, on-screen, after a grace period (the .asi loads with ScriptHookV, so it's absent
+				// on the first ticks). SyncShim runs only with the master on, so this never nags a disabled
+				// mod. Re-armed below on reconnect, so a mid-session drop warns again. Log reason deduped in shim.
+				if (!shimMissingWarned && Game.GameTime >= ShimConnectGraceMs) {
+					shimMissingWarned = true;
+					Fail("Spend shim not loaded", "- install FreemodeIdentity.asi in the game root for shop spending and skills.");
+				}
 				return; // shim not installed — pickup earning still works, spending just won't redirect
 			}
+			shimMissingWarned = false;
 			bool redirect = WalletActive && spoof.Held;
 			int activeStat = redirect ? Identity.WalletStat(spoof.Target) : 0;
 			int activeBankStat = redirect ? Identity.WalletBankStat(spoof.Target) : 0;
