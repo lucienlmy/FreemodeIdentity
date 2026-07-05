@@ -453,20 +453,24 @@ namespace FreemodeIdentity {
 			return true;
 		}
 
-		// A heritage mix weight is sane only in [0,1]. A tiny epsilon of slack absorbs float noise.
-		// Rejects NaN, wild magnitudes, AND nonzero denormals (|v| < 1e-6): a settled default heritage
-		// reads a clean 0.0, so a tiny-but-nonzero value like 8.4E-45 is a sign the blend hasn't
-		// settled yet (just-switched ped) — treat it as not-ready so the finder waits rather than
-		// searching for a near-zero fingerprint that won't match the real (settled) struct.
+		// Smallest normal float; anything nonzero below it is an IEEE subnormal. See IsValidMix.
+		const float MinNormalFloat = 1.17549435E-38f;
+
+		// Is a heritage mix weight a real, settled value rather than just-switched garbage? A valid
+		// weight is a NORMAL float in [0,1] (with ±0.1 slack: Menyoo-loaded peds write a hair outside,
+		// e.g. skin mix 1.0087 — real, stable data). Right after a model switch the getter hands back
+		// garbage until the blend settles, and that garbage is NaN, wildly out of range (4.6E+24), or a
+		// subnormal (8.4E-45) — all rejected here so the finder keeps waiting.
+		//
+		// The distinction is normal-vs-subnormal, NOT a magnitude floor: a genuinely near-zero mix can
+		// be a small NORMAL float (observed 7.45E-08 on a Menyoo-edited default-heritage ped) that a
+		// 1e-6 floor wrongly rejected as garbage, wasting the whole settle budget and losing the face.
+		// Real near-zero mixes are normal floats and pass; only subnormals — the settling artefact — fail.
 		static bool IsValidMix(float v) {
-			// A heritage mix weight is nominally [0,1], but Menyoo-loaded peds write values a hair
-			// outside it (observed skin mix = 1.0087 on a custom female — real, stable data, NOT the
-			// just-switched garbage). Tolerate ±0.1 so those round-trip; true garbage (4.6E+24, NaN,
-			// denormals) is orders of magnitude out and still rejected.
 			if (float.IsNaN(v) || v < -0.1f || v > 1.1f) {
 				return false;
 			}
-			return v == 0f || Math.Abs(v) >= 1e-6f;
+			return v == 0f || Math.Abs(v) >= MinNormalFloat;
 		}
 	}
 }

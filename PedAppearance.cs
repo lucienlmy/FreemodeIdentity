@@ -182,24 +182,37 @@ namespace FreemodeIdentity {
 		//     face wasn't in the readable system (the randomizer case whose mix lands numerically
 		//     in-range and so slips past the mix check alone).
 		// Used to warn at save time and to skip applying the face. An in-creator / heritage-slider
-		// face has a clean in-range mix or non-zero morphs, so this is false.
+		// face has a clean in-range mix, distinctive parents, or non-zero morphs, so this is false.
 		public static bool HasNoUsableFace(AppearanceData ad) {
 			bool mixGarbage = !InMixRange(ad.ShapeMix) || !InMixRange(ad.SkinMix) || !InMixRange(ad.ThirdMix);
 			bool allMorphsZero = true;
 			foreach (float v in ad.FaceFeatures) {
 				if (v != 0f) { allMorphsZero = false; break; }
 			}
+			// A distinctive heritage (non-default parents or a real blend weight) IS a real, restorable
+			// face on its own — keep it even if the morph memory read failed, rather than dropping a
+			// genuine face to a transient walk hiccup. Only condemn when there's truly nothing to save:
+			// garbage/absent heritage AND no morphs. Default freemode parents are 0/0 shape, 1/1 skin.
+			bool distinctiveHeritage = ad.ShapeFirst != 0 || ad.ShapeSecond != 0
+				|| ad.SkinFirst != 1 || ad.SkinSecond != 1
+				|| ad.ShapeMix != 0f || ad.SkinMix != 0f || ad.ThirdMix != 0f;
+			if (distinctiveHeritage && !mixGarbage) {
+				return false;
+			}
 			return (mixGarbage || !ad.HeadDataFromMemory) && allMorphsZero;
 		}
 
-		// A real heritage mix weight is a clean 0.0 or a normal float in [0,1]. Rejects NaN,
-		// out-of-range, and nonzero denormals (|v| < 1e-6): those tiny "dirty zeros" are garbage a
-		// genuine blend never writes — a settled default reads exactly 0.0.
+		// A real heritage mix weight is a clean 0.0 or a NORMAL float in [0,1]. Rejects NaN,
+		// out-of-range, and IEEE subnormals (like 1.4E-45): those are the just-switched settling
+		// artefact, not a value a genuine blend writes. The line is normal-vs-subnormal, NOT a
+		// magnitude floor — a real near-zero mix (7.45E-08, seen on a Menyoo-edited default-heritage
+		// ped) is a small normal float and must pass, or an otherwise-fine face is condemned. Kept in
+		// lockstep with PedHeadBlendMemory.IsValidMix, which gates the same distinction earlier.
 		static bool InMixRange(float v) {
 			if (float.IsNaN(v) || v < 0f || v > 1f) {
 				return false;
 			}
-			return v == 0f || Math.Abs(v) >= 1e-6f;
+			return v == 0f || Math.Abs(v) >= 1.17549435E-38f;
 		}
 
 		public static void CaptureHeritage(Ped ped, AppearanceData ad) {
