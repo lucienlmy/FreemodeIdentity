@@ -61,9 +61,8 @@ namespace FreemodeIdentity {
 		// true if it actually rewrote a stranded hash. Safe no-op if the ped isn't the strand case.
 		public bool RecoverStranded(uint realModelHash) {
 			if (Held || realModelHash == 0) return false;
-			// Only ever restore a real FREEMODE hash. A persisted source that isn't freemode is itself
-			// corrupt (the bug that wrote a garbage "real model" like 705E61F2) — writing it back onto
-			// the shared model-info would poison it, making even a genuine protagonist read wrong.
+			// Only ever restore a real FREEMODE hash. A non-freemode source is corrupt and writing it
+			// back onto the shared model-info would poison it, making even a genuine protagonist read wrong.
 			if (!PedAppearance.IsFreemodeHash(unchecked((int)realModelHash))) {
 				Logger.LogError($"Spoof: persisted source {realModelHash:X8} is not a freemode model — refusing stranded restore.");
 				return false;
@@ -84,9 +83,13 @@ namespace FreemodeIdentity {
 			if (archetype == IntPtr.Zero) return false;
 			IntPtr hashAddr = archetype + HashOffset;
 			uint memHash = MemScan.ReadUInt32(hashAddr);
-			// Only act when the ped is wearing a DIFFERENT hash than its real model — i.e. a strand.
-			// If it already reads as the real model there's nothing stranded to undo.
-			if (memHash == realModelHash) return false;
+			// A strand is ONLY a ped reading a non-freemode (protagonist) hash. If the ped already reads
+			// any valid freemode hash, nothing is stranded — restoring is never right, and restoring the
+			// persisted source when it names the OTHER gender would poison the model-info (write female
+			// onto a male body), looping the ped-recreate until the game freezes. Leave the live hash.
+			if (PedAppearance.IsFreemodeHash(unchecked((int)memHash))) {
+				return false;
+			}
 			if (!MemScan.WriteUInt32(hashAddr, realModelHash)) {
 				Logger.LogError("Spoof: stranded-hash restore failed — page not writable.");
 				return false;

@@ -678,8 +678,14 @@ namespace FreemodeIdentity {
 				// normal reengage then takes over. (A single Script can still be reloaded mid-spoof.)
 				if (!strandedRecoveryDone && player != null && player.Exists()) {
 					strandedRecoveryDone = true;
-					if (SpoofActive && !spoof.Held && spoofSourceHash != 0) {
-						spoof.RecoverStranded(spoofSourceHash);
+					if (SpoofActive && !spoof.Held) {
+						// Restore the ACTIVE LOOK's freemode model, not the raw persisted source: the look
+						// is gender-authoritative, so a genuine strand recovers to the right male/female
+						// model even if last session's source named the other gender. 0 = nothing to restore.
+						uint real = RealFreemodeHash(player);
+						if (real != 0) {
+							spoof.RecoverStranded(real);
+						}
 					}
 				}
 
@@ -1605,19 +1611,21 @@ namespace FreemodeIdentity {
 
 		// The live ped's true freemode model hash, for the spoof's stranded-poison self-heal. The
 		// ped's own Model.Hash can't be trusted here (that's exactly what a poison corrupts), so
-		// prefer the model the worn look applied, then the persisted engage-time source, then the
-		// body's gender. Returns 0 if none resolves (heal then declines, leaving the refuse path).
+		// prefer the model the worn look applied, then the LIVE body's gender, and only last the
+		// persisted engage-time source. The body's gender outranks the source because the source can
+		// be stale across sessions (last session spoofed the other gender) — trusting it there wrote
+		// the wrong-gender model and looped the ped-recreate. Returns 0 if none resolves.
 		uint RealFreemodeHash(Ped ped) {
 			AppearanceData worn = WornLook ?? (XmlAppearanceStorage.Exists(ActiveSlot) ? XmlAppearanceStorage.Get(ActiveSlot) : null);
 			if (worn != null && !string.IsNullOrEmpty(worn.Model)) {
 				uint h = unchecked((uint)new Model(worn.Model).Hash);
 				if (PedAppearance.IsFreemodeHash(unchecked((int)h))) return h;
 			}
-			if (PedAppearance.IsFreemodeHash(unchecked((int)spoofSourceHash))) return spoofSourceHash;
 			if (ped != null && ped.Exists()) {
 				string model = ped.Gender == Gender.Female ? PedAppearance.FemaleModel : PedAppearance.MaleModel;
 				return unchecked((uint)new Model(model).Hash);
 			}
+			if (PedAppearance.IsFreemodeHash(unchecked((int)spoofSourceHash))) return spoofSourceHash;
 			return 0;
 		}
 
