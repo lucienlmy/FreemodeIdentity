@@ -214,14 +214,18 @@ namespace FreemodeIdentity {
 		bool EditMode;
 		NativeCheckboxItem EditModeItem;
 		// Edit Mode is silent (the mod goes passive) and not persisted, so it's easy to leave on after
-		// closing the menu. Re-warn periodically while it's on AND no menu is open, but only a few times
-		// then go quiet — the point is to catch a forgotten toggle, not to nag a long editing session.
-		// Both counters reset whenever a menu is open or Edit Mode flips, so re-entering Edit Mode gives
-		// a fresh set. editModeReminderMs: game-time ms of the last reminder (-1 = none yet).
+		// closing the menu. Re-warn while it's on AND no menu is open, but with EXPONENTIAL BACKOFF: a
+		// real Menyoo edit runs for minutes, so a fixed short interval nags right when you're working.
+		// Start at 60s and double toward a 10min cap, then a few more at the cap and stop — spread out
+		// enough to leave editing alone, but persistent enough to catch a genuinely forgotten toggle.
+		// All state resets whenever a menu is open or Edit Mode flips, so re-entering gives a fresh set.
+		// editModeReminderMs: game-time ms of the last reminder (-1 = none yet).
 		int editModeReminderMs = -1;
 		int editModeReminderCount;
-		const int EditModeReminderIntervalMs = 60000;
-		const int EditModeReminderMax = 3; // a few nudges, then assume it's deliberate
+		int editModeReminderIntervalMs = EditModeReminderStartMs; // grows per fire, capped
+		const int EditModeReminderStartMs = 60000;
+		const int EditModeReminderCapMs = 600000;
+		const int EditModeReminderMax = 6; // a handful, spread across ~35min, then assume it's deliberate
 
 		// A snapshot queued into a slot. The capture is deferred across ticks (mood/head-blend/
 		// tattoo scans), so the slot name + options are captured up front.
@@ -954,23 +958,26 @@ namespace FreemodeIdentity {
 				// period so the persisted snapshot tracks what the player is actually carrying.
 				SampleLoadout();
 
-				// Periodic reminder that Edit Mode is still on while no menu is open (it's silent and
-				// not persisted, easy to forget). Only while the look is actually being defended — with
-				// the mod or appearance off there's nothing for Edit Mode to pause, so the nag is noise.
-				// Hold off while any menu is open — they're editing — and reset then so the first reminder
-				// lands a full interval after they leave. Fires at most EditModeReminderMax times.
+				// Periodic reminder that Edit Mode is still on while no menu is open (it's silent and not
+				// persisted, easy to forget). Only while the look is actually being defended — with the
+				// mod or appearance off there's nothing for Edit Mode to pause, so the nag is noise. The
+				// interval doubles per fire (capped) so a long edit isn't nagged; at most EditModeReminderMax.
 				if (EditMode && AppearanceActive && !AnyMenuVisible()) {
 					if (editModeReminderMs < 0) {
 						editModeReminderMs = Game.GameTime;
 					} else if (editModeReminderCount < EditModeReminderMax
-							&& Game.GameTime - editModeReminderMs >= EditModeReminderIntervalMs) {
+							&& Game.GameTime - editModeReminderMs >= editModeReminderIntervalMs) {
 						editModeReminderMs = Game.GameTime;
 						editModeReminderCount++;
+						editModeReminderIntervalMs = Math.Min(editModeReminderIntervalMs * 2, EditModeReminderCapMs);
 						Warn("Edit Mode still on", "- your look isn't being defended. Save and turn it off in the menu.");
 					}
 				} else {
+					// Menu open (or not defending): PAUSE only — clear the last-fire stamp so the next
+					// reminder waits a full interval after the menu closes, but KEEP the count and grown
+					// interval so dipping into the menu during a long edit doesn't restart the backoff and
+					// drag you back to the noisy early nudges. A full reset happens only on an Edit Mode flip.
 					editModeReminderMs = -1;
-					editModeReminderCount = 0;
 				}
 
 				if (AnyMenuVisible()) {
@@ -1837,6 +1844,10 @@ namespace FreemodeIdentity {
 				return;
 			}
 			EditMode = on;
+			// Fresh reminder schedule per Edit Mode session (the tick loop only pauses across menu opens now).
+			editModeReminderMs = -1;
+			editModeReminderCount = 0;
+			editModeReminderIntervalMs = EditModeReminderStartMs;
 			if (on && spoof.Held) {
 				spoof.Stop("edit mode");
 				if (SpoofItem != null) SpoofItem.Checked = spoofEnabled;
@@ -1858,6 +1869,7 @@ namespace FreemodeIdentity {
 			EditMode = false;
 			editModeReminderMs = -1;
 			editModeReminderCount = 0;
+			editModeReminderIntervalMs = EditModeReminderStartMs;
 			if (EditModeItem != null) EditModeItem.Checked = false;
 			Logger.Log("Edit Mode cleared (mod stopped defending).");
 		}
